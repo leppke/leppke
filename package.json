@@ -1,0 +1,23 @@
+{
+  "name": "com.festipay.pos",
+  "displayName": "Festipay POS",
+  "version": "1.0.0",
+  "description": "Festipay POS — neo-brutalist point-of-sale UI packaged as an Android app via Apache Cordova.",
+  "scripts": {
+    "android:add": "cordova platform add android",
+    "android:build": "cordova build android --debug"
+  },
+  "keywords": [
+    "ecosystem:cordova"
+  ],
+  "author": "Festipay",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "cordova-android": "^15.0.0"
+  },
+  "cordova": {
+    "platforms": [
+      "android"
+    ]
+  }
+}
