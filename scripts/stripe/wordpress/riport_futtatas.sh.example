@@ -1,0 +1,15 @@
+#!/bin/sh
+# Stripe riport futtatása (macOS / Linux) — MINTA.
+# Másold át riport_futtatas.sh néven, töltsd ki az értékeket, majd:
+#   chmod 700 riport_futtatas.sh   # csak a saját fiókod olvashassa/futtathassa (titkokat tartalmaz!)
+# Futtatás:
+#   ./riport_futtatas.sh
+
+export STRIPE_API_KEY='rk_live_IDE_A_KORLATOZOTT_KULCS'
+export WP_URL='https://marinaport.hu/app'
+export WP_USER='riport-robot'
+export WP_APP_PASSWORD='xxxx xxxx xxxx xxxx xxxx xxxx'
+export REPORT_DAYS=31
+
+cd "$(dirname "$0")"
+python3 wp_stripe_report.py
