@@ -1,0 +1,15 @@
+{
+  "name": "stripe-transaction-queries",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Stripe tranzakciók lekérdezése a hivatalos stripe npm SDK-val.",
+  "type": "module",
+  "scripts": {
+    "balance": "node stripe-transactions.mjs balance",
+    "charges": "node stripe-transactions.mjs charges",
+    "payment_intents": "node stripe-transactions.mjs payment_intents"
+  },
+  "dependencies": {
+    "stripe": "^18.0.0"
+  }
+}

@@ -1,8 +1,8 @@
 # Stripe tranzakciók programozott lekérdezése
 
-Ez a mappa egy önálló, függőségek nélküli Node.js scriptet tartalmaz
-(`stripe-transactions.mjs`), amivel a saját Stripe-fiókod tranzakcióit
-kérdezheted le a Stripe REST API-ból.
+Ez a mappa egy Node.js scriptet tartalmaz (`stripe-transactions.mjs`), ami a
+hivatalos [`stripe` npm SDK-val](https://www.npmjs.com/package/stripe) kérdezi
+le a saját Stripe-fiókod tranzakcióit.
 
 ## Előfeltétel: kihez tartoznak az adatok?
 
@@ -28,6 +28,9 @@ gépről, env változóból) futtasd.
 ## Használat
 
 ```sh
+# Függőségek telepítése (egyszer, ebben a mappában):
+npm install
+
 # Az elmúlt 7 nap pénzmozgásai (balance transactions — ez a "bankszámlakivonat"):
 STRIPE_API_KEY=rk_test_... node stripe-transactions.mjs balance
 
@@ -47,9 +50,9 @@ STRIPE_API_KEY=rk_test_... node stripe-transactions.mjs payment_intents --days 1
 | `/v1/payment_intents` | Fizetési szándékok a teljes életciklusukkal (a Stripe ajánlott fizetési modellje). |
 | `/v1/refunds`, `/v1/payouts`, `/v1/disputes` | Visszatérítések, kifizetések, reklamációk — a script mintájára könnyen hozzáadhatók. |
 
-A Stripe cursor-alapú lapozást használ (`limit` + `starting_after`); a script
-ezt automatikusan kezeli, és a `created[gte]` paraméterrel szűr dátumra.
+A Stripe cursor-alapú lapozást használ; az SDK `list()` hívása auto-lapozó
+aszinkron iterátort ad vissza, így a script `for await` ciklussal az összes
+oldalt magától végigjárja. Dátumra a `created: { gte: ... }` paraméter szűr.
 
-Hivatalos dokumentáció: <https://docs.stripe.com/api> — hivatalos SDK-k is
-elérhetők (`stripe` npm-csomag, `stripe-python`, stb.), ha nem nyers REST-tel
-szeretnél dolgozni.
+Hivatalos dokumentáció: <https://docs.stripe.com/api> és
+<https://github.com/stripe/stripe-node>.
