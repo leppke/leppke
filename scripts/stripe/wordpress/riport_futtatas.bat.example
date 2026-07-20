@@ -1,0 +1,12 @@
+@echo off
+rem Stripe riport futtatása — MINTA. Másold át riport_futtatas.bat néven,
+rem töltsd ki az értékeket, majd az NTFS jogosultságokat szűkítsd úgy,
+rem hogy csak a futtató fiók olvashassa (a fájl titkokat tartalmaz!).
+
+set STRIPE_API_KEY=rk_live_IDE_A_KORLATOZOTT_KULCS
+set WP_URL=https://a-te-oldalad.hu
+set WP_USER=riport-robot
+set WP_APP_PASSWORD=xxxx xxxx xxxx xxxx xxxx xxxx
+set REPORT_DAYS=31
+
+python "%~dp0wp_stripe_report.py"

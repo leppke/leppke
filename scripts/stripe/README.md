@@ -56,3 +56,10 @@ oldalt magától végigjárja. Dátumra a `created: { gte: ... }` paraméter sz�
 
 Hivatalos dokumentáció: <https://docs.stripe.com/api> és
 <https://github.com/stripe/stripe-node>.
+
+## Riport a könyvelőnek WordPress oldalon
+
+A `wordpress/` almappában található egy teljes megoldás (WordPress bővítmény +
+belső gépen futó Python feltöltő + lépésenkénti útmutató), amivel a riport egy
+jogosultsághoz kötött WordPress oldalon jelenik meg — lásd
+[`wordpress/README.md`](wordpress/README.md).
