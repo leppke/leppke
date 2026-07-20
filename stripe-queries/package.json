@@ -1,0 +1,16 @@
+{
+  "name": "festipay-stripe-queries",
+  "version": "1.0.0",
+  "description": "Parancssori eszköz Stripe tranzakciók programozott lekérdezéséhez (balance transactions, charges, payment intents, payouts, refunds).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "list": "node list-transactions.js"
+  },
+  "dependencies": {
+    "stripe": "^18.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
