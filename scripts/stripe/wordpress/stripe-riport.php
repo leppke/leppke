@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Riport
  * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Author: Festipay
  */
 
@@ -53,7 +53,7 @@ add_action('rest_api_init', function () {
                 return new WP_Error('bad_request', 'Hiányzó vagy hibás "rows" tömb.', ['status' => 400]);
             }
 
-            $allowed_keys = ['date', 'id', 'amount', 'fee', 'net', 'status', 'description'];
+            $allowed_keys = STRIPE_RIPORT_ROW_KEYS;
             $clean = [];
             foreach ($rows as $row) {
                 if (!is_array($row)) {
@@ -114,8 +114,8 @@ add_action('admin_menu', function () {
     });
 });
 
-const STRIPE_RIPORT_CSV_HEADER = ['Dátum', 'Azonosító', 'Összeg', 'Díj', 'Nettó', 'Státusz', 'Leírás'];
-const STRIPE_RIPORT_ROW_KEYS   = ['date', 'id', 'amount', 'fee', 'net', 'status', 'description'];
+const STRIPE_RIPORT_CSV_HEADER = ['Dátum', 'Ügyfél', 'Azonosító', 'Összeg', 'Díj', 'Nettó', 'Státusz', 'Leírás'];
+const STRIPE_RIPORT_ROW_KEYS   = ['date', 'customer', 'id', 'amount', 'fee', 'net', 'status', 'description'];
 
 /**
  * CSV-export a könyvelőnek: admin-post.php?action=stripe_riport_export
@@ -167,10 +167,12 @@ add_shortcode('stripe_riport', function () {
     $export_url = admin_url('admin-post.php?action=stripe_riport_export');
 
     // A .stripe-riport-bleed a sablon keskeny tartalomhasábjából kilépve
-    // legfeljebb 1200px (vagy a képernyő 96%-a) szélességre engedi a táblázatot.
+    // legfeljebb 1200px (vagy a képernyő 96%-a) szélességre engedi a táblázatot,
+    // a hasáb közepére igazítva (negatív margóval, transform nélkül — a
+    // transformos változat egyes sablonoknál oldalra csúszott).
     $out = '<style>
-        .stripe-riport-bleed { width: min(96vw, 1200px); position: relative;
-            left: 50%; transform: translateX(-50%); }
+        .stripe-riport-bleed { width: min(96vw, 1200px);
+            margin-left: calc((100% - min(96vw, 1200px)) / 2); }
         .stripe-riport-toolbar { display: flex; justify-content: space-between;
             align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
         .stripe-riport-toolbar p { margin: 0; }
@@ -188,13 +190,13 @@ add_shortcode('stripe_riport', function () {
             border-bottom: 2px solid #c3c4c7; position: sticky; top: 0; }
         table.stripe-riport tbody tr:nth-child(even) { background: #f8f9fa; }
         table.stripe-riport tbody tr:hover { background: #eef4fa; }
-        table.stripe-riport td:nth-child(2) { font-family: monospace;
+        table.stripe-riport td:nth-child(3) { font-family: monospace;
             font-size: 12px; }
-        table.stripe-riport th:nth-child(3), table.stripe-riport td:nth-child(3),
         table.stripe-riport th:nth-child(4), table.stripe-riport td:nth-child(4),
-        table.stripe-riport th:nth-child(5), table.stripe-riport td:nth-child(5) {
+        table.stripe-riport th:nth-child(5), table.stripe-riport td:nth-child(5),
+        table.stripe-riport th:nth-child(6), table.stripe-riport td:nth-child(6) {
             text-align: right; }
-        table.stripe-riport td:nth-child(7) { white-space: normal;
+        table.stripe-riport td:nth-child(8) { white-space: normal;
             min-width: 220px; }
     </style>';
 
@@ -206,10 +208,11 @@ add_shortcode('stripe_riport', function () {
           . 'Letöltés Excelbe (CSV)</a>'
           . '</div>';
     $out .= '<div class="stripe-riport-scroll">';
-    $out .= '<table class="stripe-riport"><thead><tr>'
-          . '<th>Dátum</th><th>Azonosító</th><th>Összeg</th><th>Díj</th>'
-          . '<th>Nettó</th><th>Státusz</th><th>Leírás</th>'
-          . '</tr></thead><tbody>';
+    $out .= '<table class="stripe-riport"><thead><tr>';
+    foreach (STRIPE_RIPORT_CSV_HEADER as $col) {
+        $out .= '<th>' . esc_html($col) . '</th>';
+    }
+    $out .= '</tr></thead><tbody>';
     foreach ($data['rows'] as $row) {
         $out .= '<tr>';
         foreach (STRIPE_RIPORT_ROW_KEYS as $key) {

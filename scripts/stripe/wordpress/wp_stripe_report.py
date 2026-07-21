@@ -39,16 +39,30 @@ def format_amount(amount: int, currency: str) -> str:
     return f"{value:,.0f} {currency.upper()}".replace(",", " ")
 
 
+def payer_name(tx) -> str:
+    # A tranzakció forrása fizetésnél egy Charge objektum (expand-dal kérjük le),
+    # abban a kártyán megadott név a billing_details.name. Díjaknál,
+    # kifizetéseknél nincs ilyen — ott üres marad.
+    source = getattr(tx, "source", None)
+    if source is None or isinstance(source, str):
+        return ""
+    billing = getattr(source, "billing_details", None)
+    name = getattr(billing, "name", None) if billing is not None else None
+    return name or ""
+
+
 def fetch_rows(days: int) -> list[dict]:
     created_after = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
     rows = []
     # A balance_transactions minden pénzmozgást tartalmaz (befizetés, díj,
     # visszatérítés, kifizetés), díj- és nettó bontással — könyveléshez ez kell.
+    # Az expand=["data.source"] miatt a kulcsnak Charges: Read jog is kell.
     for tx in stripe.BalanceTransaction.list(
-        created={"gte": created_after}, limit=100
+        created={"gte": created_after}, limit=100, expand=["data.source"]
     ).auto_paging_iter():
         rows.append({
             "date": datetime.fromtimestamp(tx.created, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
+            "customer": payer_name(tx),
             "id": tx.id,
             "amount": format_amount(tx.amount, tx.currency),
             "fee": format_amount(tx.fee, tx.currency),
