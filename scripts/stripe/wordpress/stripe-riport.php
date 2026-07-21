@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Riport
  * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
- * Version: 1.4.0
+ * Version: 1.5.0
  * Author: Festipay
  */
 
@@ -130,9 +130,19 @@ add_action('admin_post_stripe_riport_export', function () {
     $data = get_option(STRIPE_RIPORT_OPTION);
     $rows = !empty($data['rows']) && is_array($data['rows']) ? $data['rows'] : [];
 
+    // ?account=Név esetén csak az adott fiók sorai kerülnek a fájlba.
+    $account = isset($_GET['account']) ? sanitize_text_field(wp_unslash($_GET['account'])) : '';
+    $filename = 'stripe-riport-' . gmdate('Y-m-d');
+    if ($account !== '') {
+        $rows = array_filter($rows, function ($row) use ($account) {
+            return (string) ($row['account'] ?? '') === $account;
+        });
+        $filename .= '-' . sanitize_file_name($account);
+    }
+
     nocache_headers();
     header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="stripe-riport-' . gmdate('Y-m-d') . '.csv"');
+    header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
 
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
@@ -166,13 +176,24 @@ add_shortcode('stripe_riport', function () {
 
     $export_url = admin_url('admin-post.php?action=stripe_riport_export');
 
-    // A .stripe-riport-bleed a sablon keskeny tartalomhasábjából kilépve
-    // legfeljebb 1200px (vagy a képernyő 96%-a) szélességre engedi a táblázatot,
-    // a hasáb közepére igazítva (negatív margóval, transform nélkül — a
-    // transformos változat egyes sablonoknál oldalra csúszott).
+    // Fiókonként csoportosítjuk a sorokat; a táblázatokban a Fiók oszlop már
+    // nem kell, mert minden fióknak saját szakasza van.
+    $groups = [];
+    foreach ($data['rows'] as $row) {
+        $groups[(string) ($row['account'] ?? '')][] = $row;
+    }
+    ksort($groups);
+    $multi = count($groups) > 1;
+
+    $display_header = array_slice(STRIPE_RIPORT_CSV_HEADER, 1);
+    $display_keys   = array_slice(STRIPE_RIPORT_ROW_KEYS, 1);
+
+    // A .stripe-riport-bleed a teljes böngészőablak szélességére húzza ki a
+    // riportot (kis belső margóval), a sablon tartalomhasábjától függetlenül.
     $out = '<style>
-        .stripe-riport-bleed { width: min(96vw, 1200px);
-            margin-left: calc((100% - min(96vw, 1200px)) / 2); }
+        .stripe-riport-bleed { width: 100vw; margin-left: calc(50% - 50vw);
+            padding: 0 24px; box-sizing: border-box; }
+        .stripe-riport-bleed h3 { margin: 24px 0 8px; }
         .stripe-riport-toolbar { display: flex; justify-content: space-between;
             align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
         .stripe-riport-toolbar p { margin: 0; }
@@ -190,36 +211,49 @@ add_shortcode('stripe_riport', function () {
             border-bottom: 2px solid #c3c4c7; position: sticky; top: 0; }
         table.stripe-riport tbody tr:nth-child(even) { background: #f8f9fa; }
         table.stripe-riport tbody tr:hover { background: #eef4fa; }
-        table.stripe-riport td:nth-child(4) { font-family: monospace;
+        table.stripe-riport td:nth-child(3) { font-family: monospace;
             font-size: 12px; }
+        table.stripe-riport th:nth-child(4), table.stripe-riport td:nth-child(4),
         table.stripe-riport th:nth-child(5), table.stripe-riport td:nth-child(5),
-        table.stripe-riport th:nth-child(6), table.stripe-riport td:nth-child(6),
-        table.stripe-riport th:nth-child(7), table.stripe-riport td:nth-child(7) {
+        table.stripe-riport th:nth-child(6), table.stripe-riport td:nth-child(6) {
             text-align: right; }
-        table.stripe-riport td:nth-child(9) { white-space: normal;
+        table.stripe-riport td:nth-child(8) { white-space: normal;
             min-width: 220px; }
     </style>';
 
     $out .= '<div class="stripe-riport-bleed">';
     $out .= '<div class="stripe-riport-toolbar">'
           . '<p>Utolsó frissítés: ' . esc_html($data['updated'])
-          . ' &nbsp;•&nbsp; ' . count($data['rows']) . ' tétel</p>'
+          . ' &nbsp;•&nbsp; ' . count($data['rows']) . ' tétel összesen</p>'
           . '<a class="stripe-riport-export" href="' . esc_url($export_url) . '">'
-          . 'Letöltés Excelbe (CSV)</a>'
-          . '</div>';
-    $out .= '<div class="stripe-riport-scroll">';
-    $out .= '<table class="stripe-riport"><thead><tr>';
-    foreach (STRIPE_RIPORT_CSV_HEADER as $col) {
-        $out .= '<th>' . esc_html($col) . '</th>';
-    }
-    $out .= '</tr></thead><tbody>';
-    foreach ($data['rows'] as $row) {
-        $out .= '<tr>';
-        foreach (STRIPE_RIPORT_ROW_KEYS as $key) {
-            $out .= '<td>' . esc_html($row[$key] ?? '') . '</td>';
+          . ($multi ? 'Összes letöltése Excelbe (CSV)' : 'Letöltés Excelbe (CSV)')
+          . '</a></div>';
+
+    foreach ($groups as $label => $rows) {
+        if ($multi) {
+            $account_url = add_query_arg('account', rawurlencode($label), $export_url);
+            $out .= '<h3>' . esc_html($label !== '' ? $label : 'Stripe') . '</h3>';
+            $out .= '<div class="stripe-riport-toolbar">'
+                  . '<p>' . count($rows) . ' tétel</p>'
+                  . '<a class="stripe-riport-export" href="' . esc_url($account_url) . '">'
+                  . 'Letöltés Excelbe (CSV)</a>'
+                  . '</div>';
         }
-        $out .= '</tr>';
+        $out .= '<div class="stripe-riport-scroll">';
+        $out .= '<table class="stripe-riport"><thead><tr>';
+        foreach ($display_header as $col) {
+            $out .= '<th>' . esc_html($col) . '</th>';
+        }
+        $out .= '</tr></thead><tbody>';
+        foreach ($rows as $row) {
+            $out .= '<tr>';
+            foreach ($display_keys as $key) {
+                $out .= '<td>' . esc_html($row[$key] ?? '') . '</td>';
+            }
+            $out .= '</tr>';
+        }
+        $out .= '</tbody></table></div>';
     }
-    $out .= '</tbody></table></div></div>';
+    $out .= '</div>';
     return $out;
 });
