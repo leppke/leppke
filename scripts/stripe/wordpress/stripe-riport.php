@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Riport
  * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
- * Version: 1.5.0
+ * Version: 1.6.0
  * Author: Festipay
  */
 
@@ -13,6 +13,9 @@ if (!defined('ABSPATH')) {
 const STRIPE_RIPORT_OPTION       = 'stripe_riport_data';
 const STRIPE_RIPORT_TOKEN_OPTION = 'stripe_riport_token';
 const STRIPE_RIPORT_CAP_READ     = 'stripe_riport_read';
+
+const STRIPE_RIPORT_CSV_HEADER = ['Fiók', 'Dátum', 'Ügyfél', 'Azonosító', 'Összeg', 'Díj', 'Nettó', 'Státusz', 'Leírás'];
+const STRIPE_RIPORT_ROW_KEYS   = ['account', 'date', 'customer', 'id', 'amount', 'fee', 'net', 'status', 'description'];
 
 /**
  * Aktiváláskor létrejön a "konyvelo" szerepkör (be tud lépni és látja a
@@ -35,8 +38,6 @@ register_activation_hook(__FILE__, function () {
  * Hitelesítés: X-Riport-Token fejléc, értéke a Beállítások → Stripe Riport
  * oldalon látható token. Szándékosan nem az Authorization fejlécet használjuk,
  * hogy JWT/egyéb hitelesítő bővítmények ne nyúljanak bele a kérésbe.
- * Törzs: {"rows": [{"date": "...", "id": "...", "amount": "...", "fee": "...",
- *                   "net": "...", "status": "...", "description": "..."}, ...]}
  */
 add_action('rest_api_init', function () {
     register_rest_route('stripe-riport/v1', '/upload', [
@@ -53,14 +54,13 @@ add_action('rest_api_init', function () {
                 return new WP_Error('bad_request', 'Hiányzó vagy hibás "rows" tömb.', ['status' => 400]);
             }
 
-            $allowed_keys = STRIPE_RIPORT_ROW_KEYS;
             $clean = [];
             foreach ($rows as $row) {
                 if (!is_array($row)) {
                     continue;
                 }
                 $clean_row = [];
-                foreach ($allowed_keys as $key) {
+                foreach (STRIPE_RIPORT_ROW_KEYS as $key) {
                     $clean_row[$key] = isset($row[$key]) ? sanitize_text_field((string) $row[$key]) : '';
                 }
                 $clean[] = $clean_row;
@@ -114,14 +114,11 @@ add_action('admin_menu', function () {
     });
 });
 
-const STRIPE_RIPORT_CSV_HEADER = ['Fiók', 'Dátum', 'Ügyfél', 'Azonosító', 'Összeg', 'Díj', 'Nettó', 'Státusz', 'Leírás'];
-const STRIPE_RIPORT_ROW_KEYS   = ['account', 'date', 'customer', 'id', 'amount', 'fee', 'net', 'status', 'description'];
-
 /**
  * CSV-export a könyvelőnek: admin-post.php?action=stripe_riport_export
- * Bejelentkezett, riport-olvasási jogú felhasználónak; UTF-8 BOM +
- * pontosvessző elválasztó, hogy a magyar Excel azonnal oszlopokra bontva
- * nyissa meg.
+ * (?account=Név esetén csak az adott fiók sorai). Bejelentkezett,
+ * riport-olvasási jogú felhasználónak; UTF-8 BOM + pontosvessző elválasztó,
+ * hogy a magyar Excel azonnal oszlopokra bontva nyissa meg.
  */
 add_action('admin_post_stripe_riport_export', function () {
     if (!current_user_can(STRIPE_RIPORT_CAP_READ)) {
@@ -130,7 +127,6 @@ add_action('admin_post_stripe_riport_export', function () {
     $data = get_option(STRIPE_RIPORT_OPTION);
     $rows = !empty($data['rows']) && is_array($data['rows']) ? $data['rows'] : [];
 
-    // ?account=Név esetén csak az adott fiók sorai kerülnek a fájlba.
     $account = isset($_GET['account']) ? sanitize_text_field(wp_unslash($_GET['account'])) : '';
     $filename = 'stripe-riport-' . gmdate('Y-m-d');
     if ($account !== '') {
@@ -158,45 +154,14 @@ add_action('admin_post_stripe_riport_export', function () {
     exit;
 });
 
-/**
- * [stripe_riport] shortcode: táblázatban jeleníti meg a legutóbb feltöltött
- * riportot, Excel (CSV) letöltési gombbal. Csak bejelentkezett,
- * riport-olvasási joggal rendelkező felhasználó látja a tartalmat — maga az
- * oldal így akár publikus is lehet.
- */
-add_shortcode('stripe_riport', function () {
-    if (!is_user_logged_in() || !current_user_can(STRIPE_RIPORT_CAP_READ)) {
-        return '<p>Ez a riport csak bejelentkezett, jogosult felhasználóknak érhető el.</p>';
-    }
-
-    $data = get_option(STRIPE_RIPORT_OPTION);
-    if (empty($data['rows'])) {
-        return '<p>Még nem érkezett riport.</p>';
-    }
-
-    $export_url = admin_url('admin-post.php?action=stripe_riport_export');
-
-    // Fiókonként csoportosítjuk a sorokat; a táblázatokban a Fiók oszlop már
-    // nem kell, mert minden fióknak saját szakasza van.
-    $groups = [];
-    foreach ($data['rows'] as $row) {
-        $groups[(string) ($row['account'] ?? '')][] = $row;
-    }
-    ksort($groups);
-    $multi = count($groups) > 1;
-
-    $display_header = array_slice(STRIPE_RIPORT_CSV_HEADER, 1);
-    $display_keys   = array_slice(STRIPE_RIPORT_ROW_KEYS, 1);
-
-    // A .stripe-riport-bleed a teljes böngészőablak szélességére húzza ki a
-    // riportot (kis belső margóval), a sablon tartalomhasábjától függetlenül.
-    $out = '<style>
-        .stripe-riport-bleed { width: 100vw; margin-left: calc(50% - 50vw);
-            padding: 0 24px; box-sizing: border-box; }
-        .stripe-riport-bleed h3 { margin: 24px 0 8px; }
+/** A riport közös stíluslapja (beágyazott és teljes képernyős nézethez). */
+function stripe_riport_styles(): string {
+    return '<style>
+        .stripe-riport-wrap { width: 100%; }
         .stripe-riport-toolbar { display: flex; justify-content: space-between;
             align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
         .stripe-riport-toolbar p { margin: 0; }
+        .stripe-riport-wrap h3 { margin: 24px 0 8px; }
         a.stripe-riport-export { display: inline-block; padding: 8px 16px;
             background: #2271b1; color: #fff; border-radius: 4px;
             text-decoration: none; font-weight: 600; }
@@ -220,14 +185,36 @@ add_shortcode('stripe_riport', function () {
         table.stripe-riport td:nth-child(8) { white-space: normal;
             min-width: 220px; }
     </style>';
+}
 
-    $out .= '<div class="stripe-riport-bleed">';
+/**
+ * A riport törzse: felső összesítő sáv, majd fiókonként cím + letöltő gomb +
+ * táblázat. A táblázatokban a Fiók oszlop nem szerepel, mert a csoportosítás
+ * mutatja.
+ */
+function stripe_riport_render_body(array $data, bool $standalone): string {
+    $export_url = admin_url('admin-post.php?action=stripe_riport_export');
+    $view_url   = admin_url('admin-post.php?action=stripe_riport_view');
+
+    $groups = [];
+    foreach ($data['rows'] as $row) {
+        $groups[(string) ($row['account'] ?? '')][] = $row;
+    }
+    ksort($groups);
+    $multi = count($groups) > 1;
+
+    $display_header = array_slice(STRIPE_RIPORT_CSV_HEADER, 1);
+    $display_keys   = array_slice(STRIPE_RIPORT_ROW_KEYS, 1);
+
+    $out  = '<div class="stripe-riport-wrap">';
     $out .= '<div class="stripe-riport-toolbar">'
           . '<p>Utolsó frissítés: ' . esc_html($data['updated'])
           . ' &nbsp;•&nbsp; ' . count($data['rows']) . ' tétel összesen</p>'
+          . '<p>'
+          . ($standalone ? '' : '<a class="stripe-riport-export" href="' . esc_url($view_url) . '" target="_blank">Megnyitás teljes képernyőn</a> ')
           . '<a class="stripe-riport-export" href="' . esc_url($export_url) . '">'
           . ($multi ? 'Összes letöltése Excelbe (CSV)' : 'Letöltés Excelbe (CSV)')
-          . '</a></div>';
+          . '</a></p></div>';
 
     foreach ($groups as $label => $rows) {
         if ($multi) {
@@ -256,4 +243,54 @@ add_shortcode('stripe_riport', function () {
     }
     $out .= '</div>';
     return $out;
+}
+
+/**
+ * Teljes képernyős nézet: admin-post.php?action=stripe_riport_view
+ * A sablon nélkül, önálló oldalként rendereli a riportot, így a táblázat a
+ * böngészőablak teljes szélességét használja — a téma hasáb-korlátaitól és
+ * levágásaitól függetlenül.
+ */
+add_action('admin_post_stripe_riport_view', function () {
+    if (!current_user_can(STRIPE_RIPORT_CAP_READ)) {
+        wp_die('Ez a riport csak jogosult felhasználóknak érhető el.', '', ['response' => 403]);
+    }
+    $data = get_option(STRIPE_RIPORT_OPTION);
+
+    nocache_headers();
+    header('Content-Type: text/html; charset=UTF-8');
+    echo '<!doctype html><html lang="hu"><head><meta charset="utf-8">'
+       . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+       . '<title>Stripe riport</title>'
+       . '<style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",'
+       . ' Roboto, Arial, sans-serif; margin: 24px; color: #1d2327; }'
+       . ' h1 { font-size: 24px; margin: 0 0 16px; }</style>'
+       . stripe_riport_styles()
+       . '</head><body><h1>Stripe riport</h1>';
+    if (empty($data['rows'])) {
+        echo '<p>Még nem érkezett riport.</p>';
+    } else {
+        echo stripe_riport_render_body($data, true);
+    }
+    echo '</body></html>';
+    exit;
+});
+
+/**
+ * [stripe_riport] shortcode: a riport beágyazva, a sablon tartalomhasábjának
+ * szélességében, plusz gomb a teljes képernyős nézethez. Csak bejelentkezett,
+ * riport-olvasási joggal rendelkező felhasználó látja a tartalmat — maga az
+ * oldal így akár publikus is lehet.
+ */
+add_shortcode('stripe_riport', function () {
+    if (!is_user_logged_in() || !current_user_can(STRIPE_RIPORT_CAP_READ)) {
+        return '<p>Ez a riport csak bejelentkezett, jogosult felhasználóknak érhető el.</p>';
+    }
+
+    $data = get_option(STRIPE_RIPORT_OPTION);
+    if (empty($data['rows'])) {
+        return '<p>Még nem érkezett riport.</p>';
+    }
+
+    return stripe_riport_styles() . stripe_riport_render_body($data, false);
 });
