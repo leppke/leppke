@@ -3,7 +3,10 @@ rem Stripe riport futtatása — MINTA. Másold át riport_futtatas.bat néven,
 rem töltsd ki az értékeket, majd az NTFS jogosultságokat szűkítsd úgy,
 rem hogy csak a futtató fiók olvashassa (a fájl titkokat tartalmaz!).
 
+rem Egy fiók esetén:
 set STRIPE_API_KEY=rk_live_IDE_A_KORLATOZOTT_KULCS
+rem Több fiók esetén (a STRIPE_API_KEY sor helyett) Név=kulcs párok pontosvesszővel:
+rem set STRIPE_ACCOUNTS=Marina=rk_live_xxx;Kikoto=rk_live_yyy
 set WP_URL=https://a-te-oldalad.hu
 set WP_RIPORT_TOKEN=IDE_A_TOKEN_A_BEALLITASOK_STRIPE_RIPORT_OLDALROL
 set REPORT_DAYS=31

@@ -9,7 +9,9 @@ Telepítés:
     pip install stripe requests
 
 Konfiguráció környezeti változókból:
-    STRIPE_API_KEY   - Stripe korlátozott kulcs (rk_..., csak olvasás)
+    STRIPE_ACCOUNTS  - több Stripe fiók: pontosvesszővel elválasztott
+                       Név=kulcs párok, pl. Marina=rk_live_xxx;Kikoto=rk_live_yyy
+    STRIPE_API_KEY   - VAGY egyetlen fiók kulcsa (rk_..., csak olvasás)
     WP_URL           - a WordPress oldal gyökere, pl. https://pelda.hu
     WP_RIPORT_TOKEN  - feltöltési token (WordPress: Beállítások -> Stripe Riport)
     REPORT_DAYS      - hány napra visszamenőleg (alapértelmezés: 31)
@@ -51,16 +53,38 @@ def payer_name(tx) -> str:
     return name or ""
 
 
-def fetch_rows(days: int) -> list[dict]:
+def parse_accounts() -> list[tuple[str, str]]:
+    """(fióknév, kulcs) párok a STRIPE_ACCOUNTS vagy a STRIPE_API_KEY változóból."""
+    accounts_env = os.environ.get("STRIPE_ACCOUNTS", "").strip()
+    if accounts_env:
+        accounts = []
+        for part in accounts_env.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" not in part:
+                print(f"Hiba: hibás STRIPE_ACCOUNTS elem (Név=kulcs kell): {part!r}", file=sys.stderr)
+                sys.exit(1)
+            name, key = part.split("=", 1)
+            accounts.append((name.strip(), key.strip()))
+        if not accounts:
+            print("Hiba: a STRIPE_ACCOUNTS nem tartalmaz Név=kulcs párt.", file=sys.stderr)
+            sys.exit(1)
+        return accounts
+    return [("", require_env("STRIPE_API_KEY"))]
+
+
+def fetch_rows(account_name: str, api_key: str, days: int) -> list[dict]:
     created_after = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
     rows = []
     # A balance_transactions minden pénzmozgást tartalmaz (befizetés, díj,
     # visszatérítés, kifizetés), díj- és nettó bontással — könyveléshez ez kell.
     # Az expand=["data.source"] miatt a kulcsnak Charges: Read jog is kell.
     for tx in stripe.BalanceTransaction.list(
-        created={"gte": created_after}, limit=100, expand=["data.source"]
+        api_key=api_key, created={"gte": created_after}, limit=100, expand=["data.source"]
     ).auto_paging_iter():
         rows.append({
+            "account": account_name,
             "date": datetime.fromtimestamp(tx.created, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
             "customer": payer_name(tx),
             "id": tx.id,
@@ -89,14 +113,19 @@ def upload(wp_url: str, token: str, rows: list[dict]) -> None:
 
 
 def main() -> None:
-    stripe.api_key = require_env("STRIPE_API_KEY")
     stripe.max_network_retries = 2
     wp_url = require_env("WP_URL")
     wp_token = require_env("WP_RIPORT_TOKEN")
     days = int(os.environ.get("REPORT_DAYS", "31"))
+    accounts = parse_accounts()
 
-    rows = fetch_rows(days)
-    print(f"{len(rows)} tranzakció az elmúlt {days} napból.")
+    rows = []
+    for name, api_key in accounts:
+        account_rows = fetch_rows(name, api_key, days)
+        print(f"{name or 'Stripe'}: {len(account_rows)} tranzakció az elmúlt {days} napból.")
+        rows.extend(account_rows)
+
+    rows.sort(key=lambda r: r["date"], reverse=True)
     upload(wp_url, wp_token, rows)
 
 
