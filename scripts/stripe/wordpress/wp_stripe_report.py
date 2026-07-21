@@ -97,12 +97,44 @@ def fetch_rows(account_name: str, api_key: str, days: int) -> list[dict]:
     return rows
 
 
-def upload(wp_url: str, token: str, rows: list[dict]) -> None:
+def fetch_webhook_status(account_name: str, api_key: str, days: int) -> dict:
+    """Webhook-végpontok állapota + még kézbesítetlen események.
+
+    A Stripe a kézbesítési naplót nem adja ki API-n; amit tudunk: a végpont
+    státuszát (a tartósan hibázót a Stripe letiltja), és eseményenként a
+    pending_webhooks számot (>0 = van végpont, ami még nem igazolta vissza,
+    a Stripe újrapróbálja). Ehhez a kulcsnak Events: Read és Webhook
+    Endpoints: Read jog kell.
+    """
+    result = {"account": account_name, "endpoints": [], "events_total": 0, "pending": []}
+    try:
+        for ep in stripe.WebhookEndpoint.list(api_key=api_key, limit=100).auto_paging_iter():
+            result["endpoints"].append({"url": ep.url, "status": ep.status})
+
+        created_after = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+        for ev in stripe.Event.list(
+            api_key=api_key, created={"gte": created_after}, limit=100
+        ).auto_paging_iter():
+            result["events_total"] += 1
+            if ev.pending_webhooks > 0 and len(result["pending"]) < 200:
+                result["pending"].append({
+                    "date": datetime.fromtimestamp(ev.created, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                    "type": ev.type,
+                    "id": ev.id,
+                })
+    except Exception as err:  # a webhook-rész hibája ne vigye el a tranzakciós riportot
+        print(f"Figyelmeztetés ({account_name or 'Stripe'}): webhook-állapot nem elérhető: {err}",
+              file=sys.stderr)
+        result["error"] = str(err)[:300]
+    return result
+
+
+def upload(wp_url: str, token: str, rows: list[dict], webhooks: list[dict]) -> None:
     # Szándékosan saját fejléc, nem Authorization: így a JWT/egyéb hitelesítő
     # bővítmények nem nyúlnak bele a kérésbe.
     resp = requests.post(
         f"{wp_url.rstrip('/')}/wp-json/stripe-riport/v1/upload",
-        json={"rows": rows},
+        json={"rows": rows, "webhooks": webhooks},
         headers={"X-Riport-Token": token},
         timeout=60,
     )
@@ -120,13 +152,20 @@ def main() -> None:
     accounts = parse_accounts()
 
     rows = []
+    webhooks = []
     for name, api_key in accounts:
         account_rows = fetch_rows(name, api_key, days)
         print(f"{name or 'Stripe'}: {len(account_rows)} tranzakció az elmúlt {days} napból.")
         rows.extend(account_rows)
 
+        status = fetch_webhook_status(name, api_key, days)
+        if "error" not in status:
+            print(f"{name or 'Stripe'}: {len(status['endpoints'])} webhook-végpont, "
+                  f"{status['events_total']} esemény, {len(status['pending'])} kézbesítetlen.")
+        webhooks.append(status)
+
     rows.sort(key=lambda r: r["date"], reverse=True)
-    upload(wp_url, wp_token, rows)
+    upload(wp_url, wp_token, rows, webhooks)
 
 
 if __name__ == "__main__":

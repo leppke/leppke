@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Riport
  * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
- * Version: 1.6.0
+ * Version: 1.7.0
  * Author: Festipay
  */
 
@@ -66,9 +66,46 @@ add_action('rest_api_init', function () {
                 $clean[] = $clean_row;
             }
 
+            // Opcionális webhook-állapot blokk fiókonként.
+            $clean_webhooks = [];
+            $webhooks = isset($body['webhooks']) && is_array($body['webhooks']) ? $body['webhooks'] : [];
+            foreach ($webhooks as $wh) {
+                if (!is_array($wh)) {
+                    continue;
+                }
+                $entry = [
+                    'account'      => sanitize_text_field((string) ($wh['account'] ?? '')),
+                    'events_total' => (int) ($wh['events_total'] ?? 0),
+                    'endpoints'    => [],
+                    'pending'      => [],
+                ];
+                if (isset($wh['error'])) {
+                    $entry['error'] = sanitize_text_field((string) $wh['error']);
+                }
+                foreach ((array) ($wh['endpoints'] ?? []) as $ep) {
+                    if (is_array($ep)) {
+                        $entry['endpoints'][] = [
+                            'url'    => esc_url_raw((string) ($ep['url'] ?? '')),
+                            'status' => sanitize_text_field((string) ($ep['status'] ?? '')),
+                        ];
+                    }
+                }
+                foreach ((array) ($wh['pending'] ?? []) as $ev) {
+                    if (is_array($ev) && count($entry['pending']) < 200) {
+                        $entry['pending'][] = [
+                            'date' => sanitize_text_field((string) ($ev['date'] ?? '')),
+                            'type' => sanitize_text_field((string) ($ev['type'] ?? '')),
+                            'id'   => sanitize_text_field((string) ($ev['id'] ?? '')),
+                        ];
+                    }
+                }
+                $clean_webhooks[] = $entry;
+            }
+
             update_option(STRIPE_RIPORT_OPTION, [
-                'updated' => current_time('mysql'),
-                'rows'    => $clean,
+                'updated'  => current_time('mysql'),
+                'rows'     => $clean,
+                'webhooks' => $clean_webhooks,
             ], false);
 
             return ['ok' => true, 'count' => count($clean)];
@@ -184,7 +221,68 @@ function stripe_riport_styles(): string {
             text-align: right; }
         table.stripe-riport td:nth-child(8) { white-space: normal;
             min-width: 220px; }
+        table.stripe-riport-wh th, table.stripe-riport-wh td {
+            font-family: inherit !important; font-size: 14px !important;
+            text-align: left !important; }
+        .stripe-riport-badge { display: inline-block; padding: 2px 10px;
+            border-radius: 10px; font-size: 12px; font-weight: 600; }
+        .stripe-riport-badge-ok { background: #d5f5d5; color: #116611; }
+        .stripe-riport-badge-bad { background: #fbd5d5; color: #8a1f1f; }
     </style>';
+}
+
+/** Webhook-állapot szakasz: végpontok státusza + kézbesítetlen események. */
+function stripe_riport_render_webhooks(array $webhooks): string {
+    $out = '<h2>Webhookok állapota</h2>';
+    foreach ($webhooks as $wh) {
+        $label = $wh['account'] !== '' ? $wh['account'] : 'Stripe';
+        $out .= '<h3>' . esc_html($label) . '</h3>';
+
+        if (!empty($wh['error'])) {
+            $out .= '<p><span class="stripe-riport-badge stripe-riport-badge-bad">nem elérhető</span> '
+                  . esc_html($wh['error']) . '</p>';
+            continue;
+        }
+
+        if (empty($wh['endpoints'])) {
+            $out .= '<p>Ehhez a fiókhoz nincs webhook-végpont beállítva.</p>';
+            continue;
+        }
+
+        $out .= '<div class="stripe-riport-scroll"><table class="stripe-riport stripe-riport-wh">'
+              . '<thead><tr><th>Végpont URL</th><th>Státusz</th></tr></thead><tbody>';
+        foreach ($wh['endpoints'] as $ep) {
+            $ok = ($ep['status'] === 'enabled');
+            $out .= '<tr><td>' . esc_html($ep['url']) . '</td><td>'
+                  . '<span class="stripe-riport-badge stripe-riport-badge-' . ($ok ? 'ok' : 'bad') . '">'
+                  . esc_html($ok ? 'aktív' : $ep['status'])
+                  . '</span></td></tr>';
+        }
+        $out .= '</tbody></table></div>';
+
+        $pending_count = count($wh['pending']);
+        $delivered = max(0, (int) $wh['events_total'] - $pending_count);
+        $out .= '<p>' . (int) $wh['events_total'] . ' esemény az időszakban — '
+              . '<span class="stripe-riport-badge stripe-riport-badge-ok">' . $delivered . ' kézbesítve</span> ';
+        if ($pending_count > 0) {
+            $out .= '<span class="stripe-riport-badge stripe-riport-badge-bad">'
+                  . $pending_count . ' kézbesítetlen (a Stripe újrapróbálja)</span>';
+        } else {
+            $out .= '<span class="stripe-riport-badge stripe-riport-badge-ok">nincs kézbesítetlen</span>';
+        }
+        $out .= '</p>';
+
+        if ($pending_count > 0) {
+            $out .= '<div class="stripe-riport-scroll"><table class="stripe-riport stripe-riport-wh">'
+                  . '<thead><tr><th>Dátum</th><th>Esemény típusa</th><th>Azonosító</th></tr></thead><tbody>';
+            foreach ($wh['pending'] as $ev) {
+                $out .= '<tr><td>' . esc_html($ev['date']) . '</td><td>' . esc_html($ev['type'])
+                      . '</td><td>' . esc_html($ev['id']) . '</td></tr>';
+            }
+            $out .= '</tbody></table></div>';
+        }
+    }
+    return $out;
 }
 
 /**
@@ -241,6 +339,11 @@ function stripe_riport_render_body(array $data, bool $standalone): string {
         }
         $out .= '</tbody></table></div>';
     }
+
+    if (!empty($data['webhooks'])) {
+        $out .= stripe_riport_render_webhooks($data['webhooks']);
+    }
+
     $out .= '</div>';
     return $out;
 }
