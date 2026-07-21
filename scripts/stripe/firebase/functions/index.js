@@ -22,7 +22,13 @@ const ALLOWED_EMAILS = [
   "konyvelo@example.com",
 ];
 
-const ZERO_DECIMAL = new Set(["huf", "jpy", "krw", "vnd", "clp", "isk", "twd", "ugx"]);
+// A Stripe hivatalos nulla-tizedesjegyű pénznemei. A HUF/ISK/TWD szándékosan
+// NINCS köztük: hivatalosan nulla tizedesjegyűek, de a Stripe API kivételként
+// 1/100 egységben (a HUF-ot "fillérben") adja az összegüket.
+const ZERO_DECIMAL = new Set([
+  "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga",
+  "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf",
+]);
 
 function formatAmount(amount, currency) {
   const value = ZERO_DECIMAL.has(currency) ? amount : amount / 100;

@@ -24,7 +24,11 @@ from datetime import datetime, timezone, timedelta
 import requests
 import stripe
 
-ZERO_DECIMAL = {"huf", "jpy", "krw", "vnd", "clp", "isk", "twd", "ugx"}
+# A Stripe hivatalos nulla-tizedesjegyű pénznemei. A HUF/ISK/TWD szándékosan
+# NINCS köztük: hivatalosan nulla tizedesjegyűek, de a Stripe API kivételként
+# 1/100 egységben (a HUF-ot "fillérben") adja az összegüket.
+ZERO_DECIMAL = {"bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga",
+                "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"}
 
 
 def require_env(name: str) -> str:
@@ -36,9 +40,13 @@ def require_env(name: str) -> str:
 
 
 def format_amount(amount: int, currency: str) -> str:
-    # A Stripe a legkisebb pénzegységben adja az összegeket; a HUF nulla tizedesjegyű.
+    # A Stripe a legkisebb pénzegységben adja az összegeket (HUF-nál 1/100 Ft).
     value = amount if currency in ZERO_DECIMAL else amount / 100
-    return f"{value:,.0f} {currency.upper()}".replace(",", " ")
+    if value == int(value):
+        text = f"{int(value):,}".replace(",", " ")
+    else:
+        text = f"{value:,.2f}".replace(",", " ")
+    return f"{text} {currency.upper()}"
 
 
 def payer_name(tx) -> str:

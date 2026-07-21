@@ -49,8 +49,10 @@ if (!client) {
 }
 
 function formatAmount(amount, currency) {
-  // A Stripe a legkisebb pénzegységben ad összegeket (pl. cent); a HUF nulla tizedesjegyű.
-  const zeroDecimal = ['huf', 'jpy', 'krw', 'vnd', 'clp', 'isk', 'twd', 'ugx'];
+  // A Stripe a legkisebb pénzegységben ad összegeket (pl. cent). A HUF/ISK/TWD
+  // kivétel: hivatalosan nulla tizedesjegyűek, de az API 1/100 egységben adja.
+  const zeroDecimal = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga',
+    'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
   const value = zeroDecimal.includes(currency) ? amount : amount / 100;
   return `${value} ${currency.toUpperCase()}`;
 }
