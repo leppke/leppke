@@ -20,23 +20,24 @@ díj, nettó, státusz) — kulcs és nyers Stripe-adat nem.
 
 ## 1. lépés — WordPress bővítmény telepítése
 
-1. Másold fel a `stripe-riport.php` fájlt a szerverre:
-   `wp-content/plugins/stripe-riport/stripe-riport.php`
+1. Másold fel a `stripe-riport.php` fájlt a szerverre
+   (`wp-content/plugins/stripe-riport/stripe-riport.php`), vagy töltsd fel a
+   `stripe-riport.zip`-et az admin felületen (Bővítmények → Új hozzáadása →
+   Bővítmény feltöltése).
 2. Admin felületen: **Bővítmények → Stripe Riport → Aktiválás**.
-   Aktiváláskor létrejön két szerepkör: **Könyvelő** (látja a riportot) és
-   **Riport robot** (csak feltölteni tud).
+   Aktiváláskor létrejön a **Könyvelő** szerepkör és a feltöltési token.
 
-## 2. lépés — Felhasználók a WordPressben
+## 2. lépés — Könyvelő fiók és feltöltési token
 
 1. **Könyvelő fiók:** Felhasználók → Új hozzáadása → szerepkör: *Könyvelő*.
    Ezzel be tud lépni és látja a riportoldalt, mást nem tud szerkeszteni.
-2. **Robot fiók a feltöltéshez:** Új felhasználó, pl. `riport-robot`,
-   szerepkör: *Riport robot*.
-3. A robot fiók profiloldalán görgess az **Alkalmazásjelszavak (Application
-   Passwords)** részhez, adj neki nevet (pl. "stripe-riport"), és mentsd el a
-   generált jelszót — ez kell majd a Python scriptnek. (Az alkalmazásjelszó a
-   WordPress beépített, csak HTTPS felett működő API-hitelesítése; a robot
-   valódi belépési jelszavát nem kell sehova beírni.)
+2. **Feltöltési token:** **Beállítások → Stripe Riport** oldalon található —
+   ezt kell majd a Python konfigurációba (`WP_RIPORT_TOKEN`) beírni.
+   A feltöltő script ezt a tokent egy saját `X-Riport-Token` fejlécben küldi,
+   szándékosan nem az `Authorization` fejlécben — így a JWT-s vagy egyéb
+   hitelesítő bővítmények (pl. Simple JWT Login) nem nyúlnak bele a kérésbe.
+   Ha a token kiszivárogna, ugyanezen az oldalon egy kattintással új
+   generálható (a régi azonnal érvénytelen lesz).
 
 ## 3. lépés — Riportoldal létrehozása
 
@@ -61,8 +62,9 @@ elutasító üzenetet. A könyvelőnek elég ennek az oldalnak a linkjét elkül
    `riport_futtatas.bat`-ra, és töltsd ki:
    - `STRIPE_API_KEY`: a Stripe Dashboardon létrehozott **korlátozott, csak
      olvasó** kulcs (`rk_...`) — elég a *Balance transactions: Read* jog,
-   - `WP_URL`, `WP_USER`, `WP_APP_PASSWORD`: a 2. lépésben létrehozott robot
-     fiók adatai.
+   - `WP_URL`: a WordPress oldal gyökere (alkönyvtáras telepítésnél azzal
+     együtt, pl. `https://pelda.hu/app`),
+   - `WP_RIPORT_TOKEN`: a 2. lépésben kimásolt feltöltési token.
 3. **Fontos:** a `.bat` fájl titkokat tartalmaz — az NTFS jogosultságait
    szűkítsd úgy, hogy csak a futtató Windows-fiók olvashassa
    (Tulajdonságok → Biztonság).
@@ -90,9 +92,10 @@ indítása. Állítsd be, hogy akkor is fusson, ha a felhasználó nincs belépv
 - A Stripe kulcs csak a belső gépen létezik, és korlátozott, csak olvasó
   (`rk_...`) kulcs — ha mégis kiszivárogna, fizetést indítani nem lehet vele.
 - A WordPress csak származtatott riportadatot tárol, kulcsot soha.
-- A feltöltő robot fiók egyetlen dolgot tud: a riport REST végpontját hívni.
-  Az alkalmazásjelszava visszavonható a profiljából, a fiók bármikor törölhető.
+- A feltöltési token egyetlen dolgot tud: a riport REST végpontját hívni —
+  WordPress-belépésre nem használható, és a Beállítások → Stripe Riport
+  oldalon bármikor cserélhető.
 - A riportot csak *Könyvelő* szerepkörű (vagy admin) bejelentkezett
   felhasználó látja.
-- Minden forgalom HTTPS: az alkalmazásjelszavas hitelesítés sima HTTP felett
-  alapból nem is működik — a WordPress oldalnak érvényes tanúsítvány kell.
+- Minden forgalom HTTPS-en menjen — a token védelme ezen múlik, a WordPress
+  oldalnak érvényes tanúsítvány kell.

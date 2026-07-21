@@ -11,8 +11,7 @@ Telepítés:
 Konfiguráció környezeti változókból:
     STRIPE_API_KEY   - Stripe korlátozott kulcs (rk_..., csak olvasás)
     WP_URL           - a WordPress oldal gyökere, pl. https://pelda.hu
-    WP_USER          - a "riport robot" WordPress felhasználó neve
-    WP_APP_PASSWORD  - a robot felhasználó Application Password-je
+    WP_RIPORT_TOKEN  - feltöltési token (WordPress: Beállítások -> Stripe Riport)
     REPORT_DAYS      - hány napra visszamenőleg (alapértelmezés: 31)
 """
 
@@ -60,11 +59,13 @@ def fetch_rows(days: int) -> list[dict]:
     return rows
 
 
-def upload(wp_url: str, user: str, app_password: str, rows: list[dict]) -> None:
+def upload(wp_url: str, token: str, rows: list[dict]) -> None:
+    # Szándékosan saját fejléc, nem Authorization: így a JWT/egyéb hitelesítő
+    # bővítmények nem nyúlnak bele a kérésbe.
     resp = requests.post(
         f"{wp_url.rstrip('/')}/wp-json/stripe-riport/v1/upload",
         json={"rows": rows},
-        auth=(user, app_password),
+        headers={"X-Riport-Token": token},
         timeout=60,
     )
     if not resp.ok:
@@ -77,13 +78,12 @@ def main() -> None:
     stripe.api_key = require_env("STRIPE_API_KEY")
     stripe.max_network_retries = 2
     wp_url = require_env("WP_URL")
-    wp_user = require_env("WP_USER")
-    wp_app_password = require_env("WP_APP_PASSWORD")
+    wp_token = require_env("WP_RIPORT_TOKEN")
     days = int(os.environ.get("REPORT_DAYS", "31"))
 
     rows = fetch_rows(days)
     print(f"{len(rows)} tranzakció az elmúlt {days} napból.")
-    upload(wp_url, wp_user, wp_app_password, rows)
+    upload(wp_url, wp_token, rows)
 
 
 if __name__ == "__main__":

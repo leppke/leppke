@@ -5,8 +5,7 @@ rem hogy csak a futtató fiók olvashassa (a fájl titkokat tartalmaz!).
 
 set STRIPE_API_KEY=rk_live_IDE_A_KORLATOZOTT_KULCS
 set WP_URL=https://a-te-oldalad.hu
-set WP_USER=riport-robot
-set WP_APP_PASSWORD=xxxx xxxx xxxx xxxx xxxx xxxx
+set WP_RIPORT_TOKEN=IDE_A_TOKEN_A_BEALLITASOK_STRIPE_RIPORT_OLDALROL
 set REPORT_DAYS=31
 
 python "%~dp0wp_stripe_report.py"

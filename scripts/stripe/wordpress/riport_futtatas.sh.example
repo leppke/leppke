@@ -7,8 +7,7 @@
 
 export STRIPE_API_KEY='rk_live_IDE_A_KORLATOZOTT_KULCS'
 export WP_URL='https://marinaport.hu/app'
-export WP_USER='riport-robot'
-export WP_APP_PASSWORD='xxxx xxxx xxxx xxxx xxxx xxxx'
+export WP_RIPORT_TOKEN='IDE_A_TOKEN_A_BEALLITASOK_STRIPE_RIPORT_OLDALROL'
 export REPORT_DAYS=31
 
 cd "$(dirname "$0")"

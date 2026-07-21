@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Stripe Riport
- * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon.
- * Version: 1.0.0
+ * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
+ * Version: 1.1.0
  * Author: Festipay
  */
 
@@ -10,37 +10,41 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-const STRIPE_RIPORT_OPTION     = 'stripe_riport_data';
-const STRIPE_RIPORT_CAP_UPLOAD = 'stripe_riport_upload';
-const STRIPE_RIPORT_CAP_READ   = 'stripe_riport_read';
+const STRIPE_RIPORT_OPTION       = 'stripe_riport_data';
+const STRIPE_RIPORT_TOKEN_OPTION = 'stripe_riport_token';
+const STRIPE_RIPORT_CAP_READ     = 'stripe_riport_read';
 
 /**
- * Aktiváláskor létrejön két szerepkör:
- *  - "konyvelo": be tud lépni és látja a riportot (semmi mást nem szerkeszthet),
- *  - "riport_robot": csak feltölteni tud a REST végpontra (a Python script ezzel a fiókkal hitelesít).
- * Az adminisztrátor mindkét jogot megkapja.
+ * Aktiváláskor létrejön a "konyvelo" szerepkör (be tud lépni és látja a
+ * riportot, mást nem szerkeszthet), az adminisztrátor megkapja az olvasási
+ * jogot, és generálódik a feltöltési token, ha még nincs.
  */
 register_activation_hook(__FILE__, function () {
     $admin = get_role('administrator');
     if ($admin) {
-        $admin->add_cap(STRIPE_RIPORT_CAP_UPLOAD);
         $admin->add_cap(STRIPE_RIPORT_CAP_READ);
     }
     add_role('konyvelo', 'Könyvelő', ['read' => true, STRIPE_RIPORT_CAP_READ => true]);
-    add_role('riport_robot', 'Riport robot', ['read' => true, STRIPE_RIPORT_CAP_UPLOAD => true]);
+    if (!get_option(STRIPE_RIPORT_TOKEN_OPTION)) {
+        update_option(STRIPE_RIPORT_TOKEN_OPTION, wp_generate_password(48, false, false), false);
+    }
 });
 
 /**
  * REST végpont: POST /wp-json/stripe-riport/v1/upload
- * Hitelesítés: WordPress Application Password (Basic auth), csak HTTPS felett.
+ * Hitelesítés: X-Riport-Token fejléc, értéke a Beállítások → Stripe Riport
+ * oldalon látható token. Szándékosan nem az Authorization fejlécet használjuk,
+ * hogy JWT/egyéb hitelesítő bővítmények ne nyúljanak bele a kérésbe.
  * Törzs: {"rows": [{"date": "...", "id": "...", "amount": "...", "fee": "...",
  *                   "net": "...", "status": "...", "description": "..."}, ...]}
  */
 add_action('rest_api_init', function () {
     register_rest_route('stripe-riport/v1', '/upload', [
         'methods'             => 'POST',
-        'permission_callback' => function () {
-            return current_user_can(STRIPE_RIPORT_CAP_UPLOAD);
+        'permission_callback' => function (WP_REST_Request $req) {
+            $stored = (string) get_option(STRIPE_RIPORT_TOKEN_OPTION);
+            $sent   = (string) $req->get_header('X-Riport-Token');
+            return $stored !== '' && $sent !== '' && hash_equals($stored, $sent);
         },
         'callback'            => function (WP_REST_Request $req) {
             $body = $req->get_json_params();
@@ -70,6 +74,44 @@ add_action('rest_api_init', function () {
             return ['ok' => true, 'count' => count($clean)];
         },
     ]);
+});
+
+/**
+ * Beállítások → Stripe Riport: itt olvasható ki a feltöltési token, és itt
+ * lehet újat generálni (a régi azonnal érvénytelenné válik).
+ */
+add_action('admin_menu', function () {
+    add_options_page('Stripe Riport', 'Stripe Riport', 'manage_options', 'stripe-riport', function () {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        if (isset($_POST['stripe_riport_regenerate'])) {
+            check_admin_referer('stripe_riport_regenerate');
+            update_option(STRIPE_RIPORT_TOKEN_OPTION, wp_generate_password(48, false, false), false);
+            echo '<div class="notice notice-success"><p>Új token generálva — a Python konfigurációban is cserélni kell!</p></div>';
+        }
+        $token = (string) get_option(STRIPE_RIPORT_TOKEN_OPTION);
+        if ($token === '') {
+            $token = wp_generate_password(48, false, false);
+            update_option(STRIPE_RIPORT_TOKEN_OPTION, $token, false);
+        }
+        ?>
+        <div class="wrap">
+            <h1>Stripe Riport</h1>
+            <p>A belső gépen futó feltöltő script ezzel a tokennel hitelesít
+               (a <code>WP_RIPORT_TOKEN</code> értéke a <code>.bat</code> fájlban):</p>
+            <p><input type="text" readonly value="<?php echo esc_attr($token); ?>"
+                      style="width: 100%; max-width: 600px; font-family: monospace;"
+                      onclick="this.select();"></p>
+            <form method="post">
+                <?php wp_nonce_field('stripe_riport_regenerate'); ?>
+                <p><button type="submit" name="stripe_riport_regenerate" value="1" class="button">
+                    Új token generálása (a régi érvénytelenné válik)
+                </button></p>
+            </form>
+        </div>
+        <?php
+    });
 });
 
 /**
