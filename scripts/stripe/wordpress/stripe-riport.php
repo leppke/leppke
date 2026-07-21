@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Stripe Riport
  * Description: A belső hálózaton futó Python script által feltöltött Stripe tranzakciós riport fogadása és megjelenítése a könyvelőnek. Használat: [stripe_riport] shortcode egy oldalon; a feltöltési token a Beállítások → Stripe Riport oldalon található.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Festipay
  */
 
@@ -114,10 +114,45 @@ add_action('admin_menu', function () {
     });
 });
 
+const STRIPE_RIPORT_CSV_HEADER = ['Dátum', 'Azonosító', 'Összeg', 'Díj', 'Nettó', 'Státusz', 'Leírás'];
+const STRIPE_RIPORT_ROW_KEYS   = ['date', 'id', 'amount', 'fee', 'net', 'status', 'description'];
+
+/**
+ * CSV-export a könyvelőnek: admin-post.php?action=stripe_riport_export
+ * Bejelentkezett, riport-olvasási jogú felhasználónak; UTF-8 BOM +
+ * pontosvessző elválasztó, hogy a magyar Excel azonnal oszlopokra bontva
+ * nyissa meg.
+ */
+add_action('admin_post_stripe_riport_export', function () {
+    if (!current_user_can(STRIPE_RIPORT_CAP_READ)) {
+        wp_die('Ez a riport csak jogosult felhasználóknak érhető el.', '', ['response' => 403]);
+    }
+    $data = get_option(STRIPE_RIPORT_OPTION);
+    $rows = !empty($data['rows']) && is_array($data['rows']) ? $data['rows'] : [];
+
+    nocache_headers();
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="stripe-riport-' . gmdate('Y-m-d') . '.csv"');
+
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, STRIPE_RIPORT_CSV_HEADER, ';');
+    foreach ($rows as $row) {
+        $line = [];
+        foreach (STRIPE_RIPORT_ROW_KEYS as $key) {
+            $line[] = (string) ($row[$key] ?? '');
+        }
+        fputcsv($out, $line, ';');
+    }
+    fclose($out);
+    exit;
+});
+
 /**
  * [stripe_riport] shortcode: táblázatban jeleníti meg a legutóbb feltöltött
- * riportot. Csak bejelentkezett, riport-olvasási joggal rendelkező felhasználó
- * látja a tartalmat — maga az oldal így akár publikus is lehet.
+ * riportot, Excel (CSV) letöltési gombbal. Csak bejelentkezett,
+ * riport-olvasási joggal rendelkező felhasználó látja a tartalmat — maga az
+ * oldal így akár publikus is lehet.
  */
 add_shortcode('stripe_riport', function () {
     if (!is_user_logged_in() || !current_user_can(STRIPE_RIPORT_CAP_READ)) {
@@ -129,22 +164,59 @@ add_shortcode('stripe_riport', function () {
         return '<p>Még nem érkezett riport.</p>';
     }
 
-    $out  = '<p>Utolsó frissítés: ' . esc_html($data['updated']) . '</p>';
+    $export_url = admin_url('admin-post.php?action=stripe_riport_export');
+
+    // A .stripe-riport-bleed a sablon keskeny tartalomhasábjából kilépve
+    // legfeljebb 1200px (vagy a képernyő 96%-a) szélességre engedi a táblázatot.
+    $out = '<style>
+        .stripe-riport-bleed { width: min(96vw, 1200px); position: relative;
+            left: 50%; transform: translateX(-50%); }
+        .stripe-riport-toolbar { display: flex; justify-content: space-between;
+            align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }
+        .stripe-riport-toolbar p { margin: 0; }
+        a.stripe-riport-export { display: inline-block; padding: 8px 16px;
+            background: #2271b1; color: #fff; border-radius: 4px;
+            text-decoration: none; font-weight: 600; }
+        a.stripe-riport-export:hover { background: #135e96; color: #fff; }
+        .stripe-riport-scroll { overflow-x: auto; }
+        table.stripe-riport { width: 100%; border-collapse: collapse;
+            font-size: 14px; line-height: 1.4; }
+        table.stripe-riport th, table.stripe-riport td { padding: 8px 12px;
+            border-bottom: 1px solid #ddd; text-align: left;
+            white-space: nowrap; vertical-align: top; }
+        table.stripe-riport thead th { background: #f0f0f1;
+            border-bottom: 2px solid #c3c4c7; position: sticky; top: 0; }
+        table.stripe-riport tbody tr:nth-child(even) { background: #f8f9fa; }
+        table.stripe-riport tbody tr:hover { background: #eef4fa; }
+        table.stripe-riport td:nth-child(2) { font-family: monospace;
+            font-size: 12px; }
+        table.stripe-riport th:nth-child(3), table.stripe-riport td:nth-child(3),
+        table.stripe-riport th:nth-child(4), table.stripe-riport td:nth-child(4),
+        table.stripe-riport th:nth-child(5), table.stripe-riport td:nth-child(5) {
+            text-align: right; }
+        table.stripe-riport td:nth-child(7) { white-space: normal;
+            min-width: 220px; }
+    </style>';
+
+    $out .= '<div class="stripe-riport-bleed">';
+    $out .= '<div class="stripe-riport-toolbar">'
+          . '<p>Utolsó frissítés: ' . esc_html($data['updated'])
+          . ' &nbsp;•&nbsp; ' . count($data['rows']) . ' tétel</p>'
+          . '<a class="stripe-riport-export" href="' . esc_url($export_url) . '">'
+          . 'Letöltés Excelbe (CSV)</a>'
+          . '</div>';
+    $out .= '<div class="stripe-riport-scroll">';
     $out .= '<table class="stripe-riport"><thead><tr>'
           . '<th>Dátum</th><th>Azonosító</th><th>Összeg</th><th>Díj</th>'
           . '<th>Nettó</th><th>Státusz</th><th>Leírás</th>'
           . '</tr></thead><tbody>';
     foreach ($data['rows'] as $row) {
-        $out .= '<tr>'
-              . '<td>' . esc_html($row['date'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['id'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['amount'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['fee'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['net'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['status'] ?? '') . '</td>'
-              . '<td>' . esc_html($row['description'] ?? '') . '</td>'
-              . '</tr>';
+        $out .= '<tr>';
+        foreach (STRIPE_RIPORT_ROW_KEYS as $key) {
+            $out .= '<td>' . esc_html($row[$key] ?? '') . '</td>';
+        }
+        $out .= '</tr>';
     }
-    $out .= '</tbody></table>';
+    $out .= '</tbody></table></div></div>';
     return $out;
 });
