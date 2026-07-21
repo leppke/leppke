@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stripe riport</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+         Arial, sans-serif; margin: 0; color: #1d2327; background: #f6f7f7; }
+  header { background: #fff; border-bottom: 1px solid #ddd; padding: 12px 24px;
+           display: flex; justify-content: space-between; align-items: center;
+           gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 20px; margin: 0; }
+  main { padding: 24px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px;
+          padding: 24px; max-width: 380px; margin: 10vh auto; }
+  .card h2 { margin-top: 0; }
+  label { display: block; margin: 12px 0 4px; font-weight: 600; font-size: 14px; }
+  input, select { width: 100%; padding: 8px 10px; border: 1px solid #bbb;
+          border-radius: 4px; font-size: 14px; }
+  button, .btn { display: inline-block; padding: 8px 16px; background: #2271b1;
+          color: #fff; border: 0; border-radius: 4px; font-weight: 600;
+          font-size: 14px; cursor: pointer; text-decoration: none; }
+  button:hover, .btn:hover { background: #135e96; }
+  button:disabled { background: #9ab6cc; cursor: wait; }
+  button.secondary { background: #e0e0e0; color: #1d2327; }
+  .error { color: #a00; margin-top: 12px; }
+  .muted { color: #666; font-size: 14px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center;
+             gap: 12px; flex-wrap: wrap; margin: 16px 0 8px; }
+  .toolbar p { margin: 0; }
+  h2.account { margin: 28px 0 4px; }
+  .scroll { overflow-x: auto; background: #fff; border: 1px solid #ddd;
+            border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px;
+          line-height: 1.4; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid #eee; text-align: left;
+           white-space: nowrap; vertical-align: top; }
+  thead th { background: #f0f0f1; border-bottom: 2px solid #c3c4c7;
+             position: sticky; top: 0; }
+  tbody tr:nth-child(even) { background: #f8f9fa; }
+  tbody tr:hover { background: #eef4fa; }
+  table.tx td:nth-child(3) { font-family: monospace; font-size: 12px; }
+  table.tx th:nth-child(4), table.tx td:nth-child(4),
+  table.tx th:nth-child(5), table.tx td:nth-child(5),
+  table.tx th:nth-child(6), table.tx td:nth-child(6) { text-align: right; }
+  table.tx td:nth-child(8) { white-space: normal; min-width: 220px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 10px;
+           font-size: 12px; font-weight: 600; }
+  .badge-ok { background: #d5f5d5; color: #116611; }
+  .badge-bad { background: #fbd5d5; color: #8a1f1f; }
+</style>
+</head>
+<body>
+
+<div id="login-view" class="card" hidden>
+  <h2>Stripe riport — belépés</h2>
+  <label for="email">E-mail</label>
+  <input id="email" type="email" autocomplete="username">
+  <label for="password">Jelszó</label>
+  <input id="password" type="password" autocomplete="current-password">
+  <p style="margin-top:16px"><button id="login-btn">Belépés</button></p>
+  <p id="login-error" class="error" hidden></p>
+</div>
+
+<div id="app-view" hidden>
+  <header>
+    <h1>Stripe riport</h1>
+    <div>
+      <label for="days" style="display:inline; margin-right:6px">Időszak:</label>
+      <select id="days" style="width:auto; display:inline-block">
+        <option value="7">7 nap</option>
+        <option value="31" selected>31 nap</option>
+        <option value="90">90 nap</option>
+        <option value="180">180 nap</option>
+      </select>
+      <button id="load-btn">Lekérdezés</button>
+    </div>
+    <div>
+      <span id="user-email" class="muted"></span>
+      <button id="logout-btn" class="secondary">Kijelentkezés</button>
+    </div>
+  </header>
+  <main>
+    <p id="status" class="muted">Kattints a Lekérdezés gombra a friss riporthoz.</p>
+    <p id="app-error" class="error" hidden></p>
+    <div id="report"></div>
+  </main>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+import { getFunctions, httpsCallable }
+  from "https://www.gstatic.com/firebasejs/10.12.4/firebase-functions.js";
+
+// ⇩ IDE MÁSOLD a Firebase konzolból kapott web app konfigurációt
+// (Project settings → General → Your apps → SDK setup and configuration → Config)
+const firebaseConfig = {
+  apiKey: "IDE_AZ_API_KEY",
+  authDomain: "IDE_A_PROJEKT.firebaseapp.com",
+  projectId: "IDE_A_PROJEKT_ID",
+  appId: "IDE_AZ_APP_ID",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const functions = getFunctions(app, "europe-west1");
+const getReport = httpsCallable(functions, "getreport", {timeout: 300000});
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+const HEADER = ["Fiók", "Dátum", "Ügyfél", "Azonosító", "Összeg", "Díj", "Nettó", "Státusz", "Leírás"];
+const KEYS = ["account", "date", "customer", "id", "amount", "fee", "net", "status", "description"];
+let lastResult = null;
+
+onAuthStateChanged(auth, (user) => {
+  $("login-view").hidden = !!user;
+  $("app-view").hidden = !user;
+  if (user) $("user-email").textContent = user.email;
+});
+
+$("login-btn").addEventListener("click", async () => {
+  $("login-error").hidden = true;
+  try {
+    await signInWithEmailAndPassword(auth, $("email").value.trim(), $("password").value);
+  } catch (err) {
+    $("login-error").textContent = "Sikertelen belépés: " + (err.code || err.message);
+    $("login-error").hidden = false;
+  }
+});
+$("password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("login-btn").click(); });
+$("logout-btn").addEventListener("click", () => { $("report").innerHTML = ""; signOut(auth); });
+
+$("load-btn").addEventListener("click", async () => {
+  const btn = $("load-btn");
+  btn.disabled = true;
+  $("app-error").hidden = true;
+  $("status").textContent = "Lekérdezés a Stripe-ból… (pár másodperc)";
+  try {
+    const {data} = await getReport({days: parseInt($("days").value, 10)});
+    lastResult = data;
+    render(data);
+    $("status").textContent = `Lekérdezve: ${data.updated} • ${data.rows.length} tétel (${data.days} nap)`;
+  } catch (err) {
+    $("status").textContent = "";
+    $("app-error").textContent = "Hiba: " + (err.message || err);
+    $("app-error").hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function csvDownload(rows, suffix) {
+  const line = (fields) => fields.map((f) => '"' + String(f ?? "").replace(/"/g, '""') + '"').join(";");
+  const body = [line(HEADER), ...rows.map((r) => line(KEYS.map((k) => r[k])))].join("\r\n");
+  const blob = new Blob(["﻿" + body], {type: "text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `stripe-riport-${new Date().toISOString().slice(0, 10)}${suffix ? "-" + suffix : ""}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function render(data) {
+  const groups = new Map();
+  for (const row of data.rows) {
+    const label = row.account || "Stripe";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(row);
+  }
+  const multi = groups.size > 1;
+  const container = $("report");
+  container.innerHTML = "";
+
+  const topBar = document.createElement("div");
+  topBar.className = "toolbar";
+  topBar.innerHTML = `<p>${data.rows.length} tétel összesen</p>`;
+  const allBtn = document.createElement("button");
+  allBtn.textContent = multi ? "Összes letöltése Excelbe (CSV)" : "Letöltés Excelbe (CSV)";
+  allBtn.addEventListener("click", () => csvDownload(data.rows, ""));
+  topBar.appendChild(allBtn);
+  container.appendChild(topBar);
+
+  for (const [label, rows] of [...groups.entries()].sort()) {
+    if (multi) {
+      const h = document.createElement("h2");
+      h.className = "account";
+      h.textContent = label;
+      container.appendChild(h);
+      const bar = document.createElement("div");
+      bar.className = "toolbar";
+      bar.innerHTML = `<p>${rows.length} tétel</p>`;
+      const btn = document.createElement("button");
+      btn.textContent = "Letöltés Excelbe (CSV)";
+      btn.addEventListener("click", () => csvDownload(rows, label));
+      bar.appendChild(btn);
+      container.appendChild(bar);
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "scroll";
+    wrap.innerHTML = `<table class="tx"><thead><tr>${
+      HEADER.slice(1).map((c) => `<th>${esc(c)}</th>`).join("")
+    }</tr></thead><tbody>${
+      rows.map((r) => `<tr>${KEYS.slice(1).map((k) => `<td>${esc(r[k])}</td>`).join("")}</tr>`).join("")
+    }</tbody></table>`;
+    container.appendChild(wrap);
+  }
+
+  if (data.webhooks && data.webhooks.length) {
+    const h = document.createElement("h2");
+    h.textContent = "Webhookok állapota";
+    h.style.marginTop = "32px";
+    container.appendChild(h);
+    for (const wh of data.webhooks) {
+      const sub = document.createElement("h2");
+      sub.className = "account";
+      sub.textContent = wh.account || "Stripe";
+      container.appendChild(sub);
+
+      if (wh.error) {
+        const p = document.createElement("p");
+        p.innerHTML = `<span class="badge badge-bad">nem elérhető</span> ${esc(wh.error)}`;
+        container.appendChild(p);
+        continue;
+      }
+      if (!wh.endpoints.length) {
+        const p = document.createElement("p");
+        p.textContent = "Ehhez a fiókhoz nincs webhook-végpont beállítva.";
+        container.appendChild(p);
+        continue;
+      }
+
+      const epWrap = document.createElement("div");
+      epWrap.className = "scroll";
+      epWrap.innerHTML = `<table><thead><tr><th>Végpont URL</th><th>Státusz</th></tr></thead><tbody>${
+        wh.endpoints.map((ep) => {
+          const ok = ep.status === "enabled";
+          return `<tr><td>${esc(ep.url)}</td><td><span class="badge badge-${ok ? "ok" : "bad"}">${
+            esc(ok ? "aktív" : ep.status)}</span></td></tr>`;
+        }).join("")
+      }</tbody></table>`;
+      container.appendChild(epWrap);
+
+      const delivered = Math.max(0, wh.events_total - wh.pending.length);
+      const summary = document.createElement("p");
+      summary.innerHTML = `${wh.events_total} esemény az időszakban — ` +
+        `<span class="badge badge-ok">${delivered} kézbesítve</span> ` +
+        (wh.pending.length
+          ? `<span class="badge badge-bad">${wh.pending.length} kézbesítetlen (a Stripe újrapróbálja)</span>`
+          : `<span class="badge badge-ok">nincs kézbesítetlen</span>`);
+      container.appendChild(summary);
+
+      if (wh.pending.length) {
+        const pWrap = document.createElement("div");
+        pWrap.className = "scroll";
+        pWrap.innerHTML = `<table><thead><tr><th>Dátum</th><th>Esemény típusa</th><th>Azonosító</th></tr></thead><tbody>${
+          wh.pending.map((ev) => `<tr><td>${esc(ev.date)}</td><td>${esc(ev.type)}</td><td>${esc(ev.id)}</td></tr>`).join("")
+        }</tbody></table>`;
+        container.appendChild(pWrap);
+      }
+    }
+  }
+}
+</script>
+</body>
+</html>

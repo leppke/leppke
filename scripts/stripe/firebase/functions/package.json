@@ -1,0 +1,13 @@
+{
+  "name": "stripe-riport-functions",
+  "private": true,
+  "description": "Stripe riport lekérdező Cloud Function (a könyvelő indítja a weboldalról).",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-functions": "^5.1.0",
+    "stripe": "^18.0.0"
+  }
+}
