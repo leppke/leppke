@@ -1,0 +1,30 @@
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches: [claude/stripe-transaction-queries-h3oqan]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then
+            echo "::error::Hiányzik a FIREBASE_SERVICE_ACCOUNT secret. GitHub → Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+          if [ -z "${{ vars.FIREBASE_PROJECT_ID }}" ]; then
+            echo "::error::Hiányzik a FIREBASE_PROJECT_ID variable. GitHub → Settings → Secrets and variables → Actions → Variables fül → New repository variable."
+            exit 1
+          fi
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ vars.FIREBASE_PROJECT_ID }}
+          channelId: live
