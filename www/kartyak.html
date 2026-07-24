@@ -51,23 +51,25 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 <div id="app">
 <header><h1>Kártyáim, egyenleg feltöltés</h1><div class="sub">Fizetésre aktivált kártyák</div></header>
 
-<!-- Bejelentkezés: a token innen jön, automatikusan -->
+<!-- Bejelentkezés a marinaport.hu fiókkal (simple-jwt-login) -->
 <section id="screen-login" class="screen">
   <div class="status hidden" id="login-status"></div>
-  <label for="login-user">Felhasználónév</label>
-  <input type="text" id="login-user" autocomplete="username" />
+  <label for="login-user">E-mail cím</label>
+  <input type="text" id="login-user" inputmode="email" autocomplete="username" />
   <label for="login-pass">Jelszó</label>
   <input type="password" id="login-pass" autocomplete="current-password" />
   <button class="btn" id="btn-login">Bejelentkezés</button>
-  <div class="hint">Ugyanazzal a felhasználónévvel és jelszóval, mint a Thunkable appban / marinaport fiókodban. A jelszót nem tároljuk, csak a kapott munkamenet-tokent.</div>
+  <div class="hint">Ugyanazzal az <b>e-mail címmel és jelszóval</b>, amivel a marinaport oldalra / a Thunkable appba belépsz. A jelszót nem tároljuk, csak a kapott munkamenet-tokent.</div>
 </section>
 
-<!-- Ügyfél-azonosító kézi megadása, ha a login válaszában nem találjuk -->
+<!-- Ügyfél-azonosító: a Thunkable app a Firebase-ből olvassa ki e-mail alapján.
+     Ha nincs beállítva a Firebase, egyszer kézzel is megadható. -->
 <section id="screen-customer" class="screen">
-  <div class="status">A bejelentkezés sikerült, de az ügyfél-azonosítót nem találtam a válaszban. Add meg kézzel (a Thunkable appban ez a <b>Cardnet1</b> tárolt változó értéke) — egyszer kell, megjegyezzük.</div>
-  <label for="customer-id">Ügyfél-azonosító (customerId)</label>
+  <div class="status">A bejelentkezés sikerült! Már csak az ügyfél-azonosító hiányzik (a Thunkable appban ez a <b>Cardnet1</b>, amit a Firebase-ből olvas ki az e-mailed alapján). Add meg egyszer kézzel — megjegyezzük.</div>
+  <label for="customer-id">Ügyfél-azonosító (Cardnet1)</label>
   <input type="text" id="customer-id" autocomplete="off" />
   <button class="btn" id="btn-customer-save">Mentés és tovább</button>
+  <div class="hint">Ha nem tudod az azonosítót: a Firebase konzolodban a <code>2022 / (e-mailed) / Cardnet1</code> útvonalon találod, vagy add meg nekem a Firebase adatbázis címét, és automatikusan lekérem.</div>
 </section>
 
 <!-- Kártyalista -->
@@ -108,10 +110,12 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 <script>
 'use strict';
 
-/* A cardnet végpontok (teszteléshez a cardnetBase localStorage-kulccsal átirányíthatók). */
+/* Végpontok (teszteléshez a *Base localStorage-kulcsokkal átirányíthatók). */
 const BASE = localStorage.getItem('cardnetBase') || 'https://marinaint.cardnet.hu/Phoenix/marina/host';
+const PORT_BASE = localStorage.getItem('marinaportBase') || 'https://marinaport.hu/app';
 const CONFIG = {
-  LOGIN_URL: BASE + '/authentication/login',
+  /* A belépés a marinaport.hu WordPress simple-jwt-login bővítményéhez megy. */
+  LOGIN_URL: PORT_BASE + '/?rest_route=/simple-jwt-login/v1/auth',
   CARDS_URL: BASE + '/listing/getCardsByCustomerId',
   TRANSACTIONS_URL: BASE + '/listing/getTransactionsByCardId',
   TOPUP_URL: 'https://marinaport.hu/app/topup/',
@@ -124,8 +128,8 @@ const store = {
   set token(v) { if (v) localStorage.setItem('token', v); else localStorage.removeItem('token'); },
   get customerId() { return localStorage.getItem('cardnet1'); },
   set customerId(v) { if (v) localStorage.setItem('cardnet1', v); else localStorage.removeItem('cardnet1'); },
-  get username() { return localStorage.getItem('username'); },
-  set username(v) { localStorage.setItem('username', v); },
+  get email() { return localStorage.getItem('email'); },
+  set email(v) { localStorage.setItem('email', v); },
 };
 
 const state = { cardlist: [], selected: null };
@@ -179,45 +183,31 @@ function apiError(response) {
   return { code: res.ec, message: res.em || ('Hibakód: ' + res.ec), sessionExpired: res.ec === 3946 || res.ec === 2103 };
 }
 
-/* Rekurzív keresés egy kulcsra a válaszban (pl. customerId a login válaszában). */
-function deepFind(obj, key, depth) {
-  if (!obj || typeof obj !== 'object' || (depth || 0) > 6) return undefined;
-  if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null) return obj[key];
-  for (const k of Object.keys(obj)) {
-    const found = deepFind(obj[k], key, (depth || 0) + 1);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
 function goLogin(message) {
   store.token = null;
-  $('login-user').value = store.username || '';
+  $('login-user').value = store.email || '';
   $('login-pass').value = '';
   setStatus($('login-status'), message || '', !!message);
   showScreen('login');
 }
 
-/* ============ Bejelentkezés ============ */
+/* ============ Bejelentkezés (marinaport simple-jwt-login) ============ */
 async function doLogin() {
-  const username = $('login-user').value.trim();
+  const email = $('login-user').value.trim();
   const password = $('login-pass').value;
-  if (!username || !password) { setStatus($('login-status'), 'Add meg a felhasználónevet és a jelszót!', true); return; }
+  if (!email || !password) { setStatus($('login-status'), 'Add meg az e-mail címet és a jelszót!', true); return; }
   $('btn-login').disabled = true;
   setStatus($('login-status'), 'Bejelentkezés…');
   try {
-    const response = await apiPost(CONFIG.LOGIN_URL, {
-      languageId: CONFIG.LANGUAGE_ID,
-      timeZone: CONFIG.TIMEZONE,
-      username: username,
-      password: password,
-    });
-    const err = apiError(response);
-    if (err || !response.token) throw new Error(err ? err.message : 'A bejelentkezés nem adott tokent');
-    store.token = response.token;
-    store.username = username;
-    const customerId = deepFind(response, 'customerId');
-    if (customerId != null) store.customerId = String(customerId);
+    const response = await apiPost(CONFIG.LOGIN_URL, { email: email, password: password });
+    /* Siker: {"success":true,"data":{"jwt":"..."}}; hiba: {"success":false,"data":{"message":...}} */
+    const jwt = response && response.data ? response.data.jwt : null;
+    if (response.success !== true || !jwt) {
+      const msg = response && response.data && response.data.message ? response.data.message : 'Hibás e-mail cím vagy jelszó';
+      throw new Error(msg);
+    }
+    store.token = jwt;
+    store.email = email;
     if (!store.customerId) { showScreen('customer'); return; }
     loadCards();
   } catch (e) {
