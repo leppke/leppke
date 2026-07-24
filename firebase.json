@@ -1,6 +1,13 @@
 {
   "hosting": {
     "public": "www",
-    "ignore": ["firebase.json", "**/.*"]
+    "ignore": ["firebase.json", "**/.*"],
+    "redirects": [
+      {
+        "source": "/",
+        "destination": "/kartyak.html",
+        "type": 302
+      }
+    ]
   }
 }
