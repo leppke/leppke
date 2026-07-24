@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [claude/festipay-pos-design-dcss0]
+    branches: [claude/stripe-transaction-queries-h3oqan]
   workflow_dispatch:
 
 jobs:
@@ -37,6 +37,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: festipay-pos-debug-apk
+          name: marina-kartyak-debug-apk
           path: platforms/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

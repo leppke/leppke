@@ -1,8 +1,8 @@
 {
-  "name": "com.festipay.pos",
-  "displayName": "Festipay POS",
+  "name": "hu.marina.kartyak",
+  "displayName": "Marina Kártyák",
   "version": "1.0.0",
-  "description": "Festipay POS — neo-brutalist point-of-sale UI packaged as an Android app via Apache Cordova.",
+  "description": "Kártyáim, egyenleg feltöltés — kártyalista, tranzakció-lekérdezés és feltöltés Android-appként.",
   "scripts": {
     "android:add": "cordova platform add android",
     "android:build": "cordova build android --debug"
@@ -10,14 +10,18 @@
   "keywords": [
     "ecosystem:cordova"
   ],
-  "author": "Festipay",
+  "author": "Marina",
   "license": "Apache-2.0",
   "devDependencies": {
-    "cordova-android": "^15.0.0"
+    "cordova-android": "^15.0.0",
+    "cordova-plugin-advanced-http": "^3.3.1"
   },
   "cordova": {
     "platforms": [
       "android"
-    ]
+    ],
+    "plugins": {
+      "cordova-plugin-advanced-http": {}
+    }
   }
 }

@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Kártyáim, egyenleg feltöltés</title>
+<script src="cordova.js"></script>
 <style>
 :root{
   --bg:#f4f6fb; --paper:#ffffff; --ink:#16233b; --muted:#5b6b85;
@@ -145,12 +146,33 @@ function setStatus(el, text, isError) {
   el.classList.toggle('hidden', !text);
 }
 
+/* Appban (Cordova) natív HTTP-vel hívunk — így nincs CORS-korlát,
+ * pont mint a Thunkable-ben. Böngészőben marad a fetch. */
 async function apiPost(url, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  if (window.cordova && cordova.plugin && cordova.plugin.http) {
+    return new Promise((resolve, reject) => {
+      cordova.plugin.http.setDataSerializer('json');
+      cordova.plugin.http.sendRequest(url, { method: 'post', data: body }, (res) => {
+        try { resolve(JSON.parse(res.data)); }
+        catch (e) { reject(new Error('Érvénytelen válasz érkezett a szervertől')); }
+      }, (res) => {
+        reject(new Error('A szerver hibát adott (HTTP ' + res.status + ')'));
+      });
+    });
+  }
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    /* A "Failed to fetch" böngészőben szinte mindig CORS-blokkolás:
+     * a cardnet szerver nem enged más weboldalról jövő hívást. */
+    throw new Error('a böngésző nem tudta elérni a szervert (CORS-korlátozás). ' +
+      'Ezt az API-t weboldalról nem lehet hívni — használd az Android appot!');
+  }
   if (!response.ok) throw new Error('A szerver hibát adott (HTTP ' + response.status + ')');
   return response.json();
 }
@@ -325,10 +347,18 @@ function openSetup() {
 }
 
 /* ============ Indulás (képernyő Opens blokk) ============ */
-if (!store.customerId || !CONFIG.CARDS_URL) {
-  openSetup(); // a Thunkable appban: navigate to login
+function start() {
+  if (!store.customerId || !CONFIG.CARDS_URL) {
+    openSetup(); // a Thunkable appban: navigate to login
+  } else {
+    loadCards();
+  }
+}
+/* Appban meg kell várni, míg a Cordova pluginok betöltenek. */
+if (window.cordova) {
+  document.addEventListener('deviceready', start);
 } else {
-  loadCards();
+  start();
 }
 </script>
 </body>

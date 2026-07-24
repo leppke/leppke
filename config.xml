@@ -1,18 +1,18 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.festipay.pos" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
-    <name>Festipay POS</name>
-    <description>Festipay POS — neo-brutalist point-of-sale UI.</description>
-    <author email="dev@festipay.local" href="https://festipay.local">Festipay</author>
-    <content src="index.html" />
+<widget id="hu.marina.kartyak" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>Marina Kártyák</name>
+    <description>Kártyáim, egyenleg feltöltés — kártyalista, tranzakció-lekérdezés és feltöltés.</description>
+    <author email="dev@marina.local" href="https://marinaport.hu">Marina</author>
+    <content src="kartyak.html" />
     <allow-intent href="http://*/*" />
     <allow-intent href="https://*/*" />
     <access origin="*" />
-    <preference name="Fullscreen" value="true" />
-    <preference name="Orientation" value="landscape" />
-    <preference name="AndroidWindowSplashScreenBackgroundColor" value="#FFFBE9" />
+    <preference name="Orientation" value="portrait" />
+    <preference name="AndroidWindowSplashScreenBackgroundColor" value="#0d5ba8" />
     <preference name="DisallowOverscroll" value="true" />
     <preference name="android-minSdkVersion" value="24" />
     <preference name="android-targetSdkVersion" value="36" />
+    <plugin name="cordova-plugin-advanced-http" spec="^3.3.1" />
     <platform name="android">
         <allow-navigation href="https://*/*" />
     </platform>
