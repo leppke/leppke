@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stripe tranzakciók</title>
+<style>
+:root{
+  --bg:#f4f6fb; --paper:#ffffff; --ink:#16233b; --muted:#5b6b85;
+  --brand:#635bff; --brand-dark:#4b45c6; --accent:#efedff;
+  --ok:#0f9d58; --warn:#c62828; --border:1px solid #d5dce8;
+  --radius:14px; --shadow:0 2px 10px rgba(22,35,59,.08);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+#app{max-width:520px;margin:0 auto;padding:0 14px 30px}
+header{position:sticky;top:0;z-index:5;background:var(--brand);color:#fff;margin:0 -14px 16px;padding:14px 18px;box-shadow:var(--shadow)}
+header h1{font-size:18px;font-weight:700}
+header .sub{font-size:12px;opacity:.85;margin-top:2px}
+.screen{display:none}
+.screen.visible{display:block}
+.status{padding:12px 14px;background:var(--accent);border:var(--border);border-radius:var(--radius);font-size:14px;margin-bottom:14px}
+.status.error{background:#fdecea;color:var(--warn)}
+.status.hidden{display:none}
+.tx-item{background:var(--paper);border:var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-bottom:10px}
+.tx-line1{font-weight:700;font-size:14px;display:flex;justify-content:space-between;gap:10px}
+.tx-line1 .amount.neg{color:var(--warn)}
+.tx-line1 .amount.pos{color:var(--ok)}
+.tx-line2{font-size:13px;color:var(--muted);margin-top:3px}
+.tx-line3{font-size:12px;color:var(--muted);margin-top:1px}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+input,select{width:100%;padding:11px 12px;font-size:15px;border:var(--border);border-radius:10px;background:var(--paper);color:var(--ink)}
+.btn{display:block;width:100%;padding:13px;margin-top:12px;font-size:15px;font-weight:700;border:none;border-radius:10px;cursor:pointer;background:var(--brand);color:#fff}
+.btn:hover{background:var(--brand-dark)}
+.btn.ghost{background:transparent;color:var(--muted);border:var(--border)}
+.hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+.row2{display:flex;gap:10px}
+.row2>div{flex:1}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>Stripe tranzakciók</h1><div class="sub">stripe.com fiók lekérdezése</div></header>
+
+<!-- Kulcs megadása -->
+<section id="screen-setup" class="screen">
+  <div class="status">Add meg a Stripe API kulcsodat. <b>Erősen ajánlott</b> csak olvasásra jogosult <i>restricted key</i>-t (rk_...) használni — a Stripe Dashboardon: <b>Developers → API keys → Create restricted key</b>, olvasási joggal. A kulcsot csak ez a készülék tárolja.</div>
+  <label for="setup-key">Stripe API kulcs (rk_... vagy sk_...)</label>
+  <input type="password" id="setup-key" autocomplete="off" placeholder="rk_live_..." />
+  <button class="btn" id="setup-save">Mentés és tovább</button>
+  <div class="hint">A kulccsal a böngésző közvetlenül a Stripe-ot hívja (api.stripe.com), az adatok nem mennek át más szerveren.</div>
+</section>
+
+<!-- Lekérdezés -->
+<section id="screen-query" class="screen">
+  <label for="resource">Mit kérdezzünk le?</label>
+  <select id="resource">
+    <option value="balance_transactions">Elszámolt pénzmozgások (díjakkal, nettóval)</option>
+    <option value="charges">Terhelések (kártyás fizetések)</option>
+    <option value="payment_intents">Fizetési szándékok</option>
+    <option value="payouts">Kifizetések a bankszámlára</option>
+    <option value="refunds">Visszatérítések</option>
+  </select>
+  <div class="row2">
+    <div><label for="startinput">Kezdő dátum</label><input type="date" id="startinput" /></div>
+    <div><label for="endinput">Záró dátum</label><input type="date" id="endinput" /></div>
+  </div>
+  <button class="btn" id="btn-query">Lekérdezés</button>
+  <div class="status hidden" id="query-status"></div>
+  <div id="tx-list"></div>
+  <button class="btn ghost" id="btn-key">Másik API kulcs</button>
+</section>
+
+</div>
+
+<script>
+'use strict';
+
+/* Teszteléshez átirányítható; élesben az api.stripe.com megy. */
+const API_BASE = localStorage.getItem('stripeApiBase') || 'https://api.stripe.com/v1';
+const PAGE_SIZE = 100;   // a Stripe maximuma oldalanként
+const MAX_RECORDS = 500; // ennyi rekordnál megállunk, hogy ne fusson végtelenbe
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function showScreen(name) {
+  for (const s of document.querySelectorAll('.screen')) s.classList.remove('visible');
+  $('screen-' + name).classList.add('visible');
+}
+
+function setStatus(text, isError) {
+  const el = $('query-status');
+  el.textContent = text;
+  el.classList.toggle('error', !!isError);
+  el.classList.toggle('hidden', !text);
+}
+
+/* A Stripe a legkisebb pénzegységben ad összeget; a HUF nála kétdecimális. */
+function money(amount, currency) {
+  const value = amount / 100;
+  try {
+    return new Intl.NumberFormat('hu-HU', { style: 'currency', currency: (currency || 'huf').toUpperCase(), maximumFractionDigits: 2 }).format(value);
+  } catch (e) {
+    return value.toFixed(2) + ' ' + (currency || '').toUpperCase();
+  }
+}
+
+const when = (unix) => new Date(unix * 1000).toLocaleString('hu-HU', { dateStyle: 'short', timeStyle: 'short' });
+
+async function stripeGet(path, params) {
+  const key = localStorage.getItem('stripeKey');
+  const query = new URLSearchParams(params).toString();
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}?${query}`, { headers: { Authorization: 'Bearer ' + key } });
+  } catch (e) {
+    throw new Error('Nem sikerült elérni a Stripe-ot — ellenőrizd az internetkapcsolatot.');
+  }
+  const body = await response.json();
+  if (!response.ok) {
+    const msg = body && body.error ? body.error.message : 'HTTP ' + response.status;
+    throw new Error(msg);
+  }
+  return body;
+}
+
+async function fetchAll(path, from, to) {
+  const results = [];
+  let startingAfter = null;
+  while (results.length < MAX_RECORDS) {
+    const params = { limit: PAGE_SIZE };
+    if (from) params['created[gte]'] = from;
+    if (to) params['created[lte]'] = to;
+    if (startingAfter) params.starting_after = startingAfter;
+    const page = await stripeGet(path, params);
+    results.push(...page.data);
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1].id;
+    setStatus('Gyűjtöm a tranzakciókat… (' + results.length + ')');
+  }
+  return results;
+}
+
+function render(resource, records) {
+  $('tx-list').innerHTML = records.map((r) => {
+    let line1right = money(r.amount, r.currency);
+    let line2 = r.description || '';
+    let line3 = r.status || '';
+    if (resource === 'balance_transactions') {
+      line1right = money(r.net, r.currency);
+      line2 = (r.description || r.type || '') + ' — bruttó: ' + money(r.amount, r.currency) + ', díj: ' + money(r.fee, r.currency);
+      line3 = r.status || '';
+    } else if (resource === 'refunds') {
+      line2 = r.reason || '';
+    } else if (resource === 'payouts') {
+      line3 = (r.status || '') + (r.arrival_date ? ' — érkezés: ' + when(r.arrival_date).split(' ')[0] : '');
+    }
+    const sign = (r.net ?? r.amount) < 0 ? 'neg' : 'pos';
+    return `<div class="tx-item">
+      <div class="tx-line1"><span>${esc(when(r.created))}</span><span class="amount ${sign}">${esc(line1right)}</span></div>
+      ${line2 ? `<div class="tx-line2">${esc(line2)}</div>` : ''}
+      ${line3 ? `<div class="tx-line3">${esc(line3)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function runQuery() {
+  const resource = $('resource').value;
+  const start = $('startinput').value;
+  const end = $('endinput').value;
+  const from = start ? Math.floor(Date.parse(start + 'T00:00:00Z') / 1000) : null;
+  const to = end ? Math.floor(Date.parse(end + 'T23:59:59Z') / 1000) : null;
+
+  $('tx-list').innerHTML = '';
+  setStatus('Gyűjtöm a tranzakciókat…');
+  $('btn-query').disabled = true;
+  try {
+    const records = await fetchAll('/' + resource, from, to);
+    if (records.length === 0) {
+      setStatus('Nincs találat a megadott időszakban.');
+    } else {
+      setStatus(records.length + ' tranzakció' + (records.length >= MAX_RECORDS ? ' (a lista ' + MAX_RECORDS + ' rekordnál le lett vágva — szűkítsd az időszakot)' : ''));
+      render(resource, records);
+    }
+  } catch (err) {
+    setStatus('Hiba: ' + err.message, true);
+  } finally {
+    $('btn-query').disabled = false;
+  }
+}
+
+$('setup-save').addEventListener('click', () => {
+  const key = $('setup-key').value.trim();
+  if (!/^(rk|sk)_(test|live)_/.test(key)) {
+    alert('A kulcs rk_... vagy sk_... kezdetű kell legyen. (A pk_... publikus kulcs lekérdezésre nem alkalmas.)');
+    return;
+  }
+  localStorage.setItem('stripeKey', key);
+  openQuery();
+});
+$('btn-query').addEventListener('click', runQuery);
+$('btn-key').addEventListener('click', () => { $('setup-key').value = ''; showScreen('setup'); });
+
+function openQuery() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!$('startinput').value) $('startinput').value = today.slice(0, 8) + '01';
+  if (!$('endinput').value) $('endinput').value = today;
+  showScreen('query');
+}
+
+if (localStorage.getItem('stripeKey')) openQuery(); else showScreen('setup');
+</script>
+</body>
+</html>
