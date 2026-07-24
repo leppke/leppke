@@ -8,6 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # A Gradle letöltések a services.gradle.org-ról GitHubra költöztek
+      # (a régi cím átirányít, amin a wrapper-ellenőrzés elhasal) —
+      # ezért közvetlenül az új címről töltünk.
+      # Lásd: https://github.com/apache/cordova-android/issues/1863
+      CORDOVA_ANDROID_GRADLE_DISTRIBUTION_URL: https://github.com/gradle/gradle-distributions/releases/download/v8.14.2/gradle-8.14.2-bin.zip
     steps:
       - uses: actions/checkout@v4
 
