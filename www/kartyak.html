@@ -28,7 +28,7 @@ header .sub{font-size:12px;opacity:.85;margin-top:2px}
 .card-item:hover{transform:translateY(-2px)}
 .card-name{font-weight:700;font-size:15px}
 .card-type{font-size:13px;color:var(--muted);margin-top:2px}
-.card-balance{font-size:14px;margin-top:6px;font-weight:600;color:var(--brand-dark)}
+.card-balance{font-size:15px;margin-top:6px;font-weight:700;color:var(--brand-dark)}
 .tx-line1{font-weight:700;font-size:14px;display:flex;justify-content:space-between;gap:10px}
 .tx-line2{font-size:13px;color:var(--muted);margin-top:3px}
 .tx-line3{font-size:12px;color:var(--muted);margin-top:1px}
@@ -45,38 +45,35 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
 .row2{display:flex;gap:10px}
 .row2>div{flex:1}
+details{margin-top:10px}
+summary{font-size:13px;color:var(--muted);cursor:pointer}
 </style>
 </head>
 <body>
 <div id="app">
 <header><h1>Kártyáim, egyenleg feltöltés</h1><div class="sub">Fizetésre aktivált kártyák</div></header>
 
-<!-- Bejelentkezés a marinaport.hu fiókkal (simple-jwt-login) -->
-<section id="screen-login" class="screen">
-  <div class="status hidden" id="login-status"></div>
-  <label for="login-user">E-mail cím</label>
-  <input type="text" id="login-user" inputmode="email" autocomplete="username" />
-  <label for="login-pass">Jelszó</label>
-  <input type="password" id="login-pass" autocomplete="current-password" />
-  <button class="btn" id="btn-login">Bejelentkezés</button>
-  <div class="hint">Ugyanazzal az <b>e-mail címmel és jelszóval</b>, amivel a marinaport oldalra / a Thunkable appba belépsz. A jelszót nem tároljuk, csak a kapott munkamenet-tokent.</div>
-</section>
-
-<!-- Ügyfél-azonosító: a Thunkable app a Firebase-ből olvassa ki e-mail alapján.
-     Ha nincs beállítva a Firebase, egyszer kézzel is megadható. -->
-<section id="screen-customer" class="screen">
-  <div class="status">A bejelentkezés sikerült! Már csak az ügyfél-azonosító hiányzik (a Thunkable appban ez a <b>Cardnet1</b>, amit a Firebase-ből olvas ki az e-mailed alapján). Add meg egyszer kézzel — megjegyezzük.</div>
+<!-- Beállítás: ügyfél-azonosító + a cardnet szolgáltatás-fiók (username/password) -->
+<section id="screen-setup" class="screen">
+  <div class="status hidden" id="setup-status"></div>
+  <div class="status">Add meg az <b>ügyfél-azonosítót</b> (a Thunkable appban ez a <b>Cardnet1</b>). A hozzáférési adatok a lenyíló részben vannak — a jelszót a Thunkable appod „Kártyáim" képernyőjének <code>Web_API</code> blokkjából másold ki. Csak ez a készülék tárolja.</div>
   <label for="customer-id">Ügyfél-azonosító (Cardnet1)</label>
-  <input type="text" id="customer-id" autocomplete="off" />
-  <button class="btn" id="btn-customer-save">Mentés és tovább</button>
-  <div class="hint">Ha nem tudod az azonosítót: a Firebase konzolodban a <code>2022 / (e-mailed) / Cardnet1</code> útvonalon találod, vagy add meg nekem a Firebase adatbázis címét, és automatikusan lekérem.</div>
+  <input type="text" id="customer-id" inputmode="numeric" autocomplete="off" />
+  <details id="creds-box">
+    <summary>Hozzáférési adatok (egyszer kell megadni)</summary>
+    <label for="svc-user">Szolgáltatás-felhasználó</label>
+    <input type="text" id="svc-user" autocomplete="off" value="marina_mobil" />
+    <label for="svc-pass">Szolgáltatás-jelszó</label>
+    <input type="password" id="svc-pass" autocomplete="off" />
+  </details>
+  <button class="btn" id="setup-save">Mentés és kártyák betöltése</button>
 </section>
 
 <!-- Kártyalista -->
 <section id="screen-cards" class="screen">
   <div class="status" id="cards-status">Gyűjtöm a kártyákat…</div>
   <div id="card-list"></div>
-  <button class="btn ghost" id="btn-logout">Kijelentkezés</button>
+  <button class="btn ghost" id="btn-settings">Beállítások</button>
 </section>
 
 <!-- Kártya részletei: időszak-választás + lekérdezés + feltöltés -->
@@ -110,12 +107,9 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 <script>
 'use strict';
 
-/* Végpontok (teszteléshez a *Base localStorage-kulcsokkal átirányíthatók). */
+/* A cardnet végpontok (teszteléshez a cardnetBase localStorage-kulccsal átirányíthatók). */
 const BASE = localStorage.getItem('cardnetBase') || 'https://marinaint.cardnet.hu/Phoenix/marina/host';
-const PORT_BASE = localStorage.getItem('marinaportBase') || 'https://marinaport.hu/app';
 const CONFIG = {
-  /* A belépés a marinaport.hu WordPress simple-jwt-login bővítményéhez megy. */
-  LOGIN_URL: PORT_BASE + '/?rest_route=/simple-jwt-login/v1/auth',
   CARDS_URL: BASE + '/listing/getCardsByCustomerId',
   TRANSACTIONS_URL: BASE + '/listing/getTransactionsByCardId',
   TOPUP_URL: 'https://marinaport.hu/app/topup/',
@@ -123,13 +117,15 @@ const CONFIG = {
   LANGUAGE_ID: 1,
 };
 
+/* Tárolt beállítások (a böngésző / készülék localStorage-ában). */
 const store = {
-  get token() { return localStorage.getItem('token'); },
-  set token(v) { if (v) localStorage.setItem('token', v); else localStorage.removeItem('token'); },
   get customerId() { return localStorage.getItem('cardnet1'); },
   set customerId(v) { if (v) localStorage.setItem('cardnet1', v); else localStorage.removeItem('cardnet1'); },
-  get email() { return localStorage.getItem('email'); },
-  set email(v) { localStorage.setItem('email', v); },
+  get svcUser() { return localStorage.getItem('svcUser') || 'marina_mobil'; },
+  set svcUser(v) { localStorage.setItem('svcUser', v); },
+  get svcPass() { return localStorage.getItem('svcPass') || ''; },
+  set svcPass(v) { localStorage.setItem('svcPass', v); },
+  get ready() { return !!(this.customerId && this.svcPass); },
 };
 
 const state = { cardlist: [], selected: null };
@@ -176,45 +172,24 @@ async function apiPost(url, body) {
   return response.json();
 }
 
-/* A cardnet válaszok hibakódja: res.ec / res.em. A 3946/2103 lejárt munkamenet. */
+/* A cardnet hibakódja a res.ec / res.em mezőben van (ec: 0 = "Sikeres"). */
 function apiError(response) {
   const res = response && response.res;
   if (!res || !res.ec || res.ec === 0) return null;
-  return { code: res.ec, message: res.em || ('Hibakód: ' + res.ec), sessionExpired: res.ec === 3946 || res.ec === 2103 };
+  return { code: res.ec, message: res.em || ('Hibakód: ' + res.ec) };
 }
 
-function goLogin(message) {
-  store.token = null;
-  $('login-user').value = store.email || '';
-  $('login-pass').value = '';
-  setStatus($('login-status'), message || '', !!message);
-  showScreen('login');
-}
-
-/* ============ Bejelentkezés (marinaport simple-jwt-login) ============ */
-async function doLogin() {
-  const email = $('login-user').value.trim();
-  const password = $('login-pass').value;
-  if (!email || !password) { setStatus($('login-status'), 'Add meg az e-mail címet és a jelszót!', true); return; }
-  $('btn-login').disabled = true;
-  setStatus($('login-status'), 'Bejelentkezés…');
-  try {
-    const response = await apiPost(CONFIG.LOGIN_URL, { email: email, password: password });
-    /* Siker: {"success":true,"data":{"jwt":"..."}}; hiba: {"success":false,"data":{"message":...}} */
-    const jwt = response && response.data ? response.data.jwt : null;
-    if (response.success !== true || !jwt) {
-      const msg = response && response.data && response.data.message ? response.data.message : 'Hibás e-mail cím vagy jelszó';
-      throw new Error(msg);
-    }
-    store.token = jwt;
-    store.email = email;
-    if (!store.customerId) { showScreen('customer'); return; }
-    loadCards();
-  } catch (e) {
-    setStatus($('login-status'), 'Hiba: ' + e.message, true);
-  } finally {
-    $('btn-login').disabled = false;
-  }
+/* A közös hitelesítő mezők minden cardnet híváshoz. customerId számként, ha az. */
+function authFields() {
+  const raw = store.customerId;
+  const num = Number(raw);
+  return {
+    languageId: CONFIG.LANGUAGE_ID,
+    timeZone: CONFIG.TIMEZONE,
+    username: store.svcUser,
+    password: store.svcPass,
+    customerId: Number.isFinite(num) && String(num) === String(raw).trim() ? num : raw,
+  };
 }
 
 /* ============ Kártyalista ============ */
@@ -225,29 +200,21 @@ async function loadCards() {
 
   let response;
   try {
-    response = await apiPost(CONFIG.CARDS_URL, {
-      languageId: CONFIG.LANGUAGE_ID,
-      timeZone: CONFIG.TIMEZONE,
-      customerId: store.customerId,
-      token: store.token,
-    });
+    response = await apiPost(CONFIG.CARDS_URL, authFields());
   } catch (err) {
     setStatus($('cards-status'), 'Hiba a kártyák lekérésekor: ' + err.message, true);
     return;
   }
 
   const err = apiError(response);
-  if (err) {
-    if (err.sessionExpired) { goLogin(err.message); return; }
-    setStatus($('cards-status'), 'Hiba: ' + err.message, true);
-    return;
-  }
+  if (err) { setStatus($('cards-status'), 'Hiba: ' + err.message, true); return; }
 
   state.cardlist = (response.cards || [])
     .filter((card) => card && card.cardHolder && card.cardHolder.peopleName != null)
     .map((card) => ({
       name: card.cardHolder.peopleName,
       type: card.partnerCardTypeData ? card.partnerCardTypeData.partnercardTypeName : '',
+      statusName: card.cardStatusData ? card.cardStatusData.cardstatusName : '',
       balance: card.balance,
       id: card.id,
     }));
@@ -261,18 +228,20 @@ async function loadCards() {
   $('card-list').innerHTML = state.cardlist.map((card, i) => `
     <div class="card-item" data-index="${i}">
       <div class="card-name">${esc(card.name)}</div>
-      <div class="card-type">${esc(card.type)}</div>
-      <div class="card-balance">Egyenleg: ${esc(card.balance)} Ft</div>
+      <div class="card-type">${esc(card.type)}${card.statusName ? ' · ' + esc(card.statusName) : ''}</div>
+      <div class="card-balance">Egyenleg: ${esc(fmtHuf(card.balance))} Ft</div>
     </div>`).join('');
   setTimeout(() => setStatus($('cards-status'), ''), 1000);
 }
+
+const fmtHuf = (n) => Number(n).toLocaleString('hu-HU');
 
 /* ============ Kártya kiválasztása ============ */
 function selectCard(index) {
   const card = state.cardlist[index];
   if (!card) return;
   state.selected = card;
-  $('detail-card').textContent = card.name + '\n' + card.type + '\nEgyenleg: ' + card.balance + ' Ft';
+  $('detail-card').textContent = card.name + '\n' + card.type + '\nEgyenleg: ' + fmtHuf(card.balance) + ' Ft';
   const today = new Date().toISOString().slice(0, 10);
   if (!$('startinput').value) $('startinput').value = today.slice(0, 8) + '01';
   if (!$('endinput').value) $('endinput').value = today;
@@ -301,26 +270,18 @@ async function queryTransactions() {
 
   let json3;
   try {
-    json3 = await apiPost(CONFIG.TRANSACTIONS_URL, {
-      languageId: CONFIG.LANGUAGE_ID,
-      timeZone: CONFIG.TIMEZONE,
+    json3 = await apiPost(CONFIG.TRANSACTIONS_URL, Object.assign(authFields(), {
       startDate: toApiDate(startdate),
       endDate: toApiDate(enddate),
       cardId: card.id,
-      customerId: store.customerId,
-      token: store.token,
-    });
+    }));
   } catch (err) {
     setStatus($('tx-status'), 'Hiba a lekérdezéskor: ' + err.message, true);
     return;
   }
 
   const err = apiError(json3);
-  if (err) {
-    if (err.sessionExpired) { goLogin(err.message); return; }
-    setStatus($('tx-status'), 'Hiba: ' + err.message, true);
-    return;
-  }
+  if (err) { setStatus($('tx-status'), 'Hiba: ' + err.message, true); return; }
 
   const eredmeny = (json3.transactions || [])
     .filter((t) => t && t.transactionStartTime != null)
@@ -341,7 +302,7 @@ async function queryTransactions() {
   setStatus($('tx-status'), eredmeny.length + ' tranzakció');
   $('tx-list').innerHTML = eredmeny.map((t) => `
     <div class="tx-item">
-      <div class="tx-line1"><span>${esc(t.time)}</span><span>${esc(t.value.toLocaleString('hu-HU'))} Ft</span></div>
+      <div class="tx-line1"><span>${esc(t.time)}</span><span>${esc(fmtHuf(t.value))} Ft</span></div>
       <div class="tx-line2">${esc(t.company)}</div>
       <div class="tx-line3">${esc(t.func)}</div>
     </div>`).join('');
@@ -350,20 +311,34 @@ async function queryTransactions() {
 /* ============ Feltöltés ============ */
 function openTopup() {
   if (!state.selected) return;
-  $('topup-balance').textContent = state.selected.balance;
+  $('topup-balance').textContent = fmtHuf(state.selected.balance);
   $('topup-frame').src = CONFIG.TOPUP_URL;
   showScreen('topup');
 }
 
+/* ============ Beállítás képernyő ============ */
+function openSetup() {
+  $('customer-id').value = store.customerId || '';
+  $('svc-user').value = store.svcUser;
+  $('svc-pass').value = store.svcPass;
+  if (store.svcPass) $('creds-box').removeAttribute('open'); else $('creds-box').setAttribute('open', '');
+  setStatus($('setup-status'), '');
+  showScreen('setup');
+}
+
 /* ============ Eseménykezelők ============ */
-$('btn-login').addEventListener('click', doLogin);
-$('login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-$('btn-customer-save').addEventListener('click', () => {
-  const id = $('customer-id').value.trim();
-  if (!id) { alert('Az ügyfél-azonosító kötelező!'); return; }
-  store.customerId = id;
+$('setup-save').addEventListener('click', () => {
+  const customerId = $('customer-id').value.trim();
+  const svcUser = $('svc-user').value.trim();
+  const svcPass = $('svc-pass').value;
+  if (!customerId) { setStatus($('setup-status'), 'Az ügyfél-azonosító kötelező!', true); return; }
+  if (!svcPass) { setStatus($('setup-status'), 'A szolgáltatás-jelszó kötelező (a lenyíló részben).', true); $('creds-box').setAttribute('open', ''); return; }
+  store.customerId = customerId;
+  store.svcUser = svcUser || 'marina_mobil';
+  store.svcPass = svcPass;
   loadCards();
 });
+$('btn-settings').addEventListener('click', openSetup);
 $('card-list').addEventListener('click', (e) => {
   const item = e.target.closest('[data-index]');
   if (item) selectCard(Number(item.dataset.index));
@@ -373,12 +348,11 @@ $('btn-topup').addEventListener('click', openTopup);
 $('btn-back-detail').addEventListener('click', () => loadCards());
 $('btn-back-tx').addEventListener('click', () => showScreen('detail'));
 $('btn-back-topup').addEventListener('click', () => showScreen('detail'));
-$('btn-logout').addEventListener('click', () => goLogin());
 
 /* ============ Indulás ============ */
 function start() {
-  if (store.token && store.customerId) loadCards();
-  else goLogin();
+  if (store.ready) loadCards();
+  else openSetup();
 }
 if (window.cordova) {
   document.addEventListener('deviceready', start);
