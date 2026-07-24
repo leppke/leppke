@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kártyáim, egyenleg feltöltés</title>
+<style>
+:root{
+  --bg:#f4f6fb; --paper:#ffffff; --ink:#16233b; --muted:#5b6b85;
+  --brand:#0d5ba8; --brand-dark:#0a4682; --accent:#e8f1fb;
+  --ok:#0f9d58; --warn:#c62828; --border:1px solid #d5dce8;
+  --radius:14px; --shadow:0 2px 10px rgba(22,35,59,.08);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+#app{max-width:520px;margin:0 auto;padding:0 14px 30px}
+header{position:sticky;top:0;z-index:5;background:var(--brand);color:#fff;margin:0 -14px 16px;padding:14px 18px;box-shadow:var(--shadow)}
+header h1{font-size:18px;font-weight:700}
+header .sub{font-size:12px;opacity:.85;margin-top:2px}
+.screen{display:none}
+.screen.visible{display:block}
+.status{padding:12px 14px;background:var(--accent);border:var(--border);border-radius:var(--radius);font-size:14px;margin-bottom:14px}
+.status.error{background:#fdecea;color:var(--warn)}
+.status.hidden{display:none}
+.card-item,.tx-item{background:var(--paper);border:var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-bottom:10px}
+.card-item{cursor:pointer;transition:transform .08s}
+.card-item:hover{transform:translateY(-2px)}
+.card-name{font-weight:700;font-size:15px}
+.card-type{font-size:13px;color:var(--muted);margin-top:2px}
+.card-balance{font-size:14px;margin-top:6px;font-weight:600;color:var(--brand-dark)}
+.tx-line1{font-weight:700;font-size:14px;display:flex;justify-content:space-between;gap:10px}
+.tx-line2{font-size:13px;color:var(--muted);margin-top:3px}
+.tx-line3{font-size:12px;color:var(--muted);margin-top:1px}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+input[type="date"],input[type="text"],input[type="password"]{width:100%;padding:11px 12px;font-size:15px;border:var(--border);border-radius:10px;background:var(--paper);color:var(--ink)}
+.btn{display:block;width:100%;padding:13px;margin-top:12px;font-size:15px;font-weight:700;border:none;border-radius:10px;cursor:pointer;background:var(--brand);color:#fff}
+.btn:hover{background:var(--brand-dark)}
+.btn.secondary{background:var(--paper);color:var(--brand-dark);border:1px solid var(--brand)}
+.btn.ghost{background:transparent;color:var(--muted);border:var(--border)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.selected-card{background:var(--accent);border:var(--border);border-radius:var(--radius);padding:14px;margin-bottom:6px;white-space:pre-line;font-size:14px}
+.topup-balance{background:var(--paper);border:var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px;font-size:15px}
+iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);background:#fff}
+.hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1 id="header-title">Kártyáim, egyenleg feltöltés</h1><div class="sub" id="header-sub">Fizetésre aktivált kártyák</div></header>
+
+<!-- Beállítás / "login": a Thunkable app a stored token + Cardnet1 (customerId) nélkül a login képernyőre navigál -->
+<section id="screen-setup" class="screen">
+  <div class="status">Az induláshoz add meg az ügyfél-azonosítót (a Thunkable appban ez a <b>stored variable Cardnet1</b>) és a belépési tokent. Az adatokat csak ez a készülék tárolja (localStorage).</div>
+  <label for="setup-customer">Ügyfél-azonosító (customerId)</label>
+  <input type="text" id="setup-customer" autocomplete="off" />
+  <label for="setup-token">Token</label>
+  <input type="password" id="setup-token" autocomplete="off" />
+  <button class="btn" id="setup-save">Mentés és indítás</button>
+</section>
+
+<!-- Kártyalista: a képernyő-megnyitás blokk (kártyák begyűjtése a cards[] tömbből) -->
+<section id="screen-cards" class="screen">
+  <div class="status" id="cards-status">Gyűjtöm a kártyákat…</div>
+  <div id="card-list"></div>
+  <button class="btn ghost" id="btn-logout">Kijelentkezés</button>
+</section>
+
+<!-- Kártya részletei: List_Viewer6 Item Click után -->
+<section id="screen-detail" class="screen">
+  <div class="selected-card" id="detail-card"></div>
+  <label for="startinput">Kezdő dátum</label>
+  <input type="date" id="startinput" />
+  <label for="endinput">Záró dátum</label>
+  <input type="date" id="endinput" />
+  <button class="btn" id="btn-query">Tranzakciók lekérdezése</button>
+  <button class="btn secondary" id="btn-topup">Kártya feltöltés</button>
+  <button class="btn ghost" id="btn-back-detail">Vissza a kártyákhoz</button>
+</section>
+
+<!-- Tranzakciólista: BuLekérdezés Click -->
+<section id="screen-tx" class="screen">
+  <div class="status" id="tx-status">Gyűjtöm a tranzakciókat…</div>
+  <div id="tx-list"></div>
+  <button class="btn ghost" id="btn-back-tx">Vissza</button>
+</section>
+
+<!-- Feltöltés: "Kártya feltöltés" Click → marinaport.hu/app/topup webnézet -->
+<section id="screen-topup" class="screen">
+  <div class="topup-balance">Feltöltés bankkártyával<br /><b>Egyenleg: <span id="topup-balance">–</span> Ft</b></div>
+  <iframe id="topup-frame" title="Feltöltés bankkártyával"></iframe>
+  <button class="btn ghost" id="btn-back-topup">Vissza</button>
+</section>
+
+</div>
+
+<script>
+'use strict';
+
+/* ======================= BEÁLLÍTÁSOK =======================
+ * A Thunkable blokkokban a Web_API3 URL-je csonkolva látszik
+ * ("https://marinaint.cardnet.hu/Phoenix/marina/host…"), ezért a
+ * pontos végpontokat innen, a Thunkable projektből kimásolva kell
+ * beírni. Ha mindkét hívás ugyanarra a végpontra megy, elég
+ * ugyanazt az URL-t megadni mindkét helyre.
+ */
+const CONFIG = {
+  CARDS_URL: 'https://marinaint.cardnet.hu/Phoenix/marina/host…',        // ← IDE a kártyalista végpont teljes URL-je
+  TRANSACTIONS_URL: 'https://marinaint.cardnet.hu/Phoenix/marina/host…', // ← IDE a tranzakciós végpont teljes URL-je
+  TOPUP_URL: 'https://marinaport.hu/app/topup/',
+  TIMEZONE: 'Europe/Budapest',
+  LANGUAGE_ID: 1,
+};
+
+/* A Thunkable "stored variable"-ök megfelelője a böngészőben a localStorage. */
+const store = {
+  get token() { return localStorage.getItem('token'); },
+  set token(v) { localStorage.setItem('token', v); },
+  get customerId() { return localStorage.getItem('cardnet1'); },  // stored variable Cardnet1
+  set customerId(v) { localStorage.setItem('cardnet1', v); },
+  clear() { localStorage.removeItem('token'); localStorage.removeItem('cardnet1'); },
+};
+
+/* App-változók (a blokkok "app variable"-jei) */
+const state = {
+  cardlist: [],   // {name, type, balance, id} — a blokkokban cardlist + idlist külön
+  selected: null, // a kiválasztott kártya (nevek + id2)
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function showScreen(name) {
+  for (const s of document.querySelectorAll('.screen')) s.classList.remove('visible');
+  $('screen-' + name).classList.add('visible');
+}
+
+function setStatus(el, text, isError) {
+  el.textContent = text;
+  el.classList.toggle('error', !!isError);
+  el.classList.toggle('hidden', !text);
+}
+
+async function apiPost(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error('A szerver hibát adott (HTTP ' + response.status + ')');
+  return response.json();
+}
+
+/* ============ Kártyalista (képernyő-megnyitás blokk) ============ */
+async function loadCards() {
+  showScreen('cards');
+  $('card-list').innerHTML = '';
+  setStatus($('cards-status'), 'Gyűjtöm a kártyákat…');
+
+  if (!store.customerId) {
+    setStatus($('cards-status'), 'Nincs kártya regisztrálva a fizetésre.', true);
+    return;
+  }
+
+  let response;
+  try {
+    response = await apiPost(CONFIG.CARDS_URL, {
+      languageId: CONFIG.LANGUAGE_ID,
+      timeZone: CONFIG.TIMEZONE,
+      customerId: store.customerId,
+    });
+  } catch (err) {
+    setStatus($('cards-status'), 'Hiba a kártyák lekérésekor: ' + err.message, true);
+    return;
+  }
+
+  /* A blokkok a cards[] tömböt járják be, és kihagyják azokat az
+   * elemeket, ahol a cardHolder.peopleName üres. */
+  state.cardlist = (response.cards || [])
+    .filter((card) => card && card.cardHolder && card.cardHolder.peopleName != null)
+    .map((card) => ({
+      name: card.cardHolder.peopleName,
+      type: card.partnerCardTypeData ? card.partnerCardTypeData.partnercardTypeName : '',
+      balance: card.balance,
+      id: card.id,
+    }));
+
+  if (state.cardlist.length === 0) {
+    setStatus($('cards-status'), 'Nincs kártya regisztrálva a fizetésre.', true);
+    return;
+  }
+
+  setStatus($('cards-status'), 'Kész!');
+  $('card-list').innerHTML = state.cardlist.map((card, i) => `
+    <div class="card-item" data-index="${i}">
+      <div class="card-name">${esc(card.name)}</div>
+      <div class="card-type">${esc(card.type)}</div>
+      <div class="card-balance">Egyenleg: ${esc(card.balance)} Ft</div>
+    </div>`).join('');
+  setTimeout(() => setStatus($('cards-status'), ''), 1000);
+}
+
+/* ============ Kártya kiválasztása (List_Viewer6 Item Click) ============ */
+function selectCard(index) {
+  const card = state.cardlist[index];
+  if (!card) return;
+  state.selected = card; // nevek + id2 a blokkokban
+  $('detail-card').textContent = card.name + '\n' + card.type + '\nEgyenleg: ' + card.balance + ' Ft';
+  const today = new Date().toISOString().slice(0, 10);
+  if (!$('startinput').value) $('startinput').value = today.slice(0, 8) + '01';
+  if (!$('endinput').value) $('endinput').value = today;
+  showScreen('detail');
+}
+
+/* ============ Tranzakció-lekérdezés (BuLekérdezés Click) ============ */
+
+/* "2026-07-24" → "20260724" — a blokkok a dátumból pontcserével csinálnak
+ * YYYYMMDD formát; a natív date input értékéből a kötőjeleket vesszük ki. */
+const toApiDate = (value) => value.replaceAll('-', '');
+
+/* "20260724143005…" → "2026.07.24. 14:30" — a blokkbeli substring-összefűzés mása. */
+function formatTxTime(raw) {
+  const s = String(raw);
+  if (s.length < 12) return s;
+  return s.slice(0, 4) + '.' + s.slice(4, 6) + '.' + s.slice(6, 8) + '. ' + s.slice(8, 10) + ':' + s.slice(10, 12);
+}
+
+async function queryTransactions() {
+  const card = state.selected;
+  if (!card) return;
+  const startdate = $('startinput').value;
+  const enddate = $('endinput').value;
+  if (!startdate || !enddate) { alert('Add meg a kezdő és a záró dátumot!'); return; }
+
+  showScreen('tx');
+  $('tx-list').innerHTML = '';
+  setStatus($('tx-status'), 'Gyűjtöm a tranzakciókat…');
+
+  let json3;
+  try {
+    json3 = await apiPost(CONFIG.TRANSACTIONS_URL, {
+      languageId: CONFIG.LANGUAGE_ID,
+      timeZone: CONFIG.TIMEZONE,
+      startDate: toApiDate(startdate),
+      endDate: toApiDate(enddate),
+      cardId: card.id,          // app variable id2
+      customerId: store.customerId, // stored variable Cardnet1
+    });
+  } catch (err) {
+    setStatus($('tx-status'), 'Hiba a lekérdezéskor: ' + err.message, true);
+    return;
+  }
+
+  /* A blokkok a transactions[] tömböt járják be a transactionStartTime
+   * kiürüléséig; az összeget 100-zal osztják (0 tizedesre kerekítve). */
+  const eredmeny = (json3.transactions || [])
+    .filter((t) => t && t.transactionStartTime != null)
+    .map((t) => ({
+      sortKey: String(t.transactionStartTime),
+      time: formatTxTime(t.transactionStartTime),
+      value: Math.round(Number(t.value) / 100),
+      company: t.payofCompanysite ? t.payofCompanysite.companysiteName : '',
+      func: t.sysfunction ? t.sysfunction.sysfunctionName : '',
+    }))
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey)); // a blokkok ábécé szerint, növekvően rendeznek
+
+  if (eredmeny.length === 0) {
+    setStatus($('tx-status'), 'Nincs tranzakció a megadott időszakban.');
+    return;
+  }
+
+  setStatus($('tx-status'), eredmeny.length + ' tranzakció');
+  $('tx-list').innerHTML = eredmeny.map((t) => `
+    <div class="tx-item">
+      <div class="tx-line1"><span>${esc(t.time)}</span><span>${esc(t.value.toLocaleString('hu-HU'))} Ft</span></div>
+      <div class="tx-line2">${esc(t.company)}</div>
+      <div class="tx-line3">${esc(t.func)}</div>
+    </div>`).join('');
+}
+
+/* ============ Feltöltés (Kártya feltöltés Click) ============ */
+function openTopup() {
+  if (!state.selected) return;
+  $('topup-balance').textContent = state.selected.balance;
+  $('topup-frame').src = CONFIG.TOPUP_URL;
+  showScreen('topup');
+}
+
+/* ============ Eseménykezelők ============ */
+$('card-list').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-index]');
+  if (item) selectCard(Number(item.dataset.index));
+});
+$('btn-query').addEventListener('click', queryTransactions);
+$('btn-topup').addEventListener('click', openTopup);
+$('btn-back-detail').addEventListener('click', () => loadCards());
+$('btn-back-tx').addEventListener('click', () => showScreen('detail'));
+$('btn-back-topup').addEventListener('click', () => showScreen('detail'));
+$('btn-logout').addEventListener('click', () => { store.clear(); showScreen('setup'); });
+$('setup-save').addEventListener('click', () => {
+  const customerId = $('setup-customer').value.trim();
+  const token = $('setup-token').value.trim();
+  if (!customerId) { alert('Az ügyfél-azonosító kötelező!'); return; }
+  store.customerId = customerId;
+  if (token) store.token = token;
+  loadCards();
+});
+
+/* ============ Indulás (képernyő Opens blokk) ============ */
+if (!store.token && !store.customerId) {
+  showScreen('setup'); // a Thunkable appban: navigate to login
+} else {
+  loadCards();
+}
+</script>
+</body>
+</html>
