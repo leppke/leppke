@@ -48,13 +48,18 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 <div id="app">
 <header><h1 id="header-title">Kártyáim, egyenleg feltöltés</h1><div class="sub" id="header-sub">Fizetésre aktivált kártyák</div></header>
 
-<!-- Beállítás / "login": a Thunkable app a stored token + Cardnet1 (customerId) nélkül a login képernyőre navigál -->
+<!-- Beállítás / "login": a Thunkable app a stored token + Cardnet1 (customerId) nélkül a login képernyőre navigál.
+     Itt adhatók meg az API-végpontok is, így a kódot nem kell szerkeszteni. -->
 <section id="screen-setup" class="screen">
-  <div class="status">Az induláshoz add meg az ügyfél-azonosítót (a Thunkable appban ez a <b>stored variable Cardnet1</b>) és a belépési tokent. Az adatokat csak ez a készülék tárolja (localStorage).</div>
+  <div class="status">Az induláshoz add meg az ügyfél-azonosítót (a Thunkable appban ez a <b>stored variable Cardnet1</b>) és az API-végpontokat (a Thunkable Web_API3 blokk URL-je). Az adatokat csak ez a készülék tárolja (localStorage).</div>
   <label for="setup-customer">Ügyfél-azonosító (customerId)</label>
   <input type="text" id="setup-customer" autocomplete="off" />
-  <label for="setup-token">Token</label>
+  <label for="setup-token">Token (nem kötelező)</label>
   <input type="password" id="setup-token" autocomplete="off" />
+  <label for="setup-cards-url">Kártyalista API URL</label>
+  <input type="text" id="setup-cards-url" autocomplete="off" placeholder="https://marinaint.cardnet.hu/Phoenix/marina/…" />
+  <label for="setup-tx-url">Tranzakciós API URL (ha üres, a kártyalista URL-t használja)</label>
+  <input type="text" id="setup-tx-url" autocomplete="off" placeholder="https://marinaint.cardnet.hu/Phoenix/marina/…" />
   <button class="btn" id="setup-save">Mentés és indítás</button>
 </section>
 
@@ -62,6 +67,7 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 <section id="screen-cards" class="screen">
   <div class="status" id="cards-status">Gyűjtöm a kártyákat…</div>
   <div id="card-list"></div>
+  <button class="btn ghost" id="btn-settings">Beállítások</button>
   <button class="btn ghost" id="btn-logout">Kijelentkezés</button>
 </section>
 
@@ -97,15 +103,14 @@ iframe{width:100%;height:62vh;border:var(--border);border-radius:var(--radius);b
 'use strict';
 
 /* ======================= BEÁLLÍTÁSOK =======================
- * A Thunkable blokkokban a Web_API3 URL-je csonkolva látszik
- * ("https://marinaint.cardnet.hu/Phoenix/marina/host…"), ezért a
- * pontos végpontokat innen, a Thunkable projektből kimásolva kell
- * beírni. Ha mindkét hívás ugyanarra a végpontra megy, elég
- * ugyanazt az URL-t megadni mindkét helyre.
+ * Az API-végpontokat nem kell a kódba írni: a beállítás-képernyőn
+ * megadott értékeket a localStorage tárolja, és azok felülírják az
+ * itteni alapértékeket. (A Thunkable blokkokban a Web_API3 URL-je
+ * csonkolva látszik, a pontos címet a Thunkable projektből másold ki.)
  */
 const CONFIG = {
-  CARDS_URL: 'https://marinaint.cardnet.hu/Phoenix/marina/host…',        // ← IDE a kártyalista végpont teljes URL-je
-  TRANSACTIONS_URL: 'https://marinaint.cardnet.hu/Phoenix/marina/host…', // ← IDE a tranzakciós végpont teljes URL-je
+  get CARDS_URL() { return localStorage.getItem('cardsUrl') || ''; },
+  get TRANSACTIONS_URL() { return localStorage.getItem('txUrl') || this.CARDS_URL; },
   TOPUP_URL: 'https://marinaport.hu/app/topup/',
   TIMEZONE: 'Europe/Budapest',
   LANGUAGE_ID: 1,
@@ -295,19 +300,33 @@ $('btn-topup').addEventListener('click', openTopup);
 $('btn-back-detail').addEventListener('click', () => loadCards());
 $('btn-back-tx').addEventListener('click', () => showScreen('detail'));
 $('btn-back-topup').addEventListener('click', () => showScreen('detail'));
-$('btn-logout').addEventListener('click', () => { store.clear(); showScreen('setup'); });
+$('btn-logout').addEventListener('click', () => { store.clear(); openSetup(); });
+$('btn-settings').addEventListener('click', openSetup);
 $('setup-save').addEventListener('click', () => {
   const customerId = $('setup-customer').value.trim();
   const token = $('setup-token').value.trim();
+  const cardsUrl = $('setup-cards-url').value.trim();
+  const txUrl = $('setup-tx-url').value.trim();
   if (!customerId) { alert('Az ügyfél-azonosító kötelező!'); return; }
+  if (!cardsUrl) { alert('A kártyalista API URL kötelező!'); return; }
   store.customerId = customerId;
   if (token) store.token = token;
+  localStorage.setItem('cardsUrl', cardsUrl);
+  if (txUrl) localStorage.setItem('txUrl', txUrl); else localStorage.removeItem('txUrl');
   loadCards();
 });
 
+function openSetup() {
+  $('setup-customer').value = store.customerId || '';
+  $('setup-token').value = store.token || '';
+  $('setup-cards-url').value = localStorage.getItem('cardsUrl') || '';
+  $('setup-tx-url').value = localStorage.getItem('txUrl') || '';
+  showScreen('setup');
+}
+
 /* ============ Indulás (képernyő Opens blokk) ============ */
-if (!store.token && !store.customerId) {
-  showScreen('setup'); // a Thunkable appban: navigate to login
+if (!store.customerId || !CONFIG.CARDS_URL) {
+  openSetup(); // a Thunkable appban: navigate to login
 } else {
   loadCards();
 }
